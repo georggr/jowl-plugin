@@ -129,7 +129,7 @@ jOWL.Ontology = {
 				if(match) return; var lnode = $(this);
 				if(jOWL.options.locale) { 
 					var loc = lnode.attr('xml:lang');
-					if(!loc && !label) { label = lnode.text(); console.log('rdfs:label without xml:lang attribute found: ', lnode);}
+					if(!loc && !label) { label = lnode.text();}
 					if(loc == jOWL.options.locale) { label = lnode.text(); match = true; }
 					}
 			});
@@ -261,9 +261,12 @@ jOWL.Ontology = {
 			if(restrtype == "Individual") return this.target;
 			if(this.target == null) return jOWL('Thing');
 			if(!cachedTarget) cachedTarget = jOWL(this.target); return cachedTarget;}
-		this.getTargets = function(){var q = this.getTarget(); if(q.type == "owl:Class") { 
-			return q.individuals().concat(q.children()); }}
-		
+
+		this.getTargets = function(){
+			var q = this.getTarget(); 
+			if(q.type == "owl:Class") { 
+			return q.individuals().concat(q.children()); 
+			}}		
 		
 		this.merge = function(crit){
 			if(this.isCardinalityRestriction && crit.isValueRestriction ) { this.target = crit.target; return true;}
@@ -334,7 +337,13 @@ jOWL.Ontology = {
 			jOWL.data(this.name, "parents", oParents);			
 			return oParents;
 			};
-		this.individuals = function(){ return jOWL.getIndividuals(this); }
+		this.individuals = function(){
+			var arr = new jOWL.Ontology.Array();
+			new jOWL.SPARQL_DL("Type(?x, "+this.name+")").execute({async: false, onComplete: function(r){
+				arr = r.jOWLArray("?x");
+			}});
+			return arr; 
+			}
 		this.children = function(){
 			var oChildren = jOWL.data(this.name, "children");			
 			if(oChildren) return oChildren;
@@ -428,13 +437,17 @@ jOWL.Ontology = {
 		};
 		/**Get a jowl array of criteria - restriction: property + target object, will return true/false if present*/
 		this.sourceof = function(restriction){
-			var crit = jOWL.data(this.name, "sourceof"); 
-				var self = this;
+			var self = this, crit = jOWL.data(this.name, "sourceof");				
 			if(!crit) populate();
-			if(restriction){
-				var bool = false; crit.each(function(item, i){
-				if(item.target == restriction.target.name && item.property.name == restriction.property.name) bool = true;
-			}); return bool;
+			if(restriction){ //check if restriction is present
+				var bool = false; 
+				crit.each(function(item, i){
+					if(item.target == restriction.target.name && item.property.name == restriction.property.name) bool = true;	});
+				if(bool) return true;
+				this.parents().each(function(p){
+						if(!bool && p.sourceof) if(p.sourceof(restriction)) bool = true;
+					});				
+				return bool;
 			}
 
 			function populate(){
@@ -643,16 +656,6 @@ jOWL.getXML = function(rdfID){
 			node.notfound = notfound;
 			return node;
 		};
-		/** 
-		Get some statistics on the ontology
-		*/
-jOWL.stats = function(){ 
-			var doc = this.document;
-			var st = new Object();
-			st.concepts = jOWL.Xpath("//owl:Class").filter(function(index){return this.namespaceURI == jOWL.NS.owl && $(this).RDF_ID();}).length;
-			st.conceptrefs = jOWL.Xpath("//owl:Class").filter(function(index){return $(this).attr('rdf:about') != undefined;}).length;
-			return st;
-		};
 		/**
 		* Initialize jOWL with an OWL-RDFS document.
 		* @param path relative path to xml document
@@ -663,11 +666,10 @@ jOWL.stats = function(){
 		*    locale: set preferred language (if available), examples en, fr...
 		*/
 jOWL.load = function(path, callback, options){
-			if(jOWL.document) jOWL.document == null;
 			if($.browser.msie && location.toString().indexOf('file') == 0) { //stupid IE won't load local xml files
 				var that = this;
 				var xml = document.createElement("xml");
-				xml.validateOnParse = false; //throws stupid DTD errors (for 'rdf:') on perfectly defined OWL files otherwise
+				xml.validateOnParse = false; //IE throws stupid DTD errors (for 'rdf:') on perfectly defined OWL files otherwise
 				xml.src = path;
 				xml.onreadystatechange = function()
 					{ 
@@ -695,7 +697,7 @@ jOWL.parse = function(doc, options){
 					xmldoc.loadXML(doc); doc = xmldoc; 
 					} // MSIE
 			}
-			jOWL.document = doc; //namespaces: alert(doc.lastChild.attributes.length);
+			jOWL.document = doc;
 			if($.browser.msie){ 	
 				jOWL.document.setProperty("SelectionLanguage", "XPath");
 				jOWL.document.setProperty("SelectionNamespaces", jOWL.NS.all);
@@ -904,48 +906,108 @@ options.onUpdate: partial results
 options.childDepth: depth to fetch children, default 4, impacts performance
 options.chewsize: arrays will be processed in smaller chunks (asynchronous), with size indicated by chewsize, default 10
 options.async: default true, query asynchronously
+options.expandQuery: 
 parameters: prefill some sparql-dl parameters with jOWL objects
 execute: start query, results are passed through options.onComplete
 */
 jOWL.SPARQL_DL = function(syntax, parameters, options){
 		var self = this;
         this.query = [];
-		this.parameters = {};
-		this.options = $.extend({onComplete: function(results){}}, options);
+		this.result = {partial : [], param : {}};
+		this.result.jOWLArray = function(param){
+			if(!param) throw "parameter must be defined for jOWLArray function";
+			var arr = new jOWL.Ontology.Array();
+			for(var i=0;i<this.results.length;i++){
+			arr.push(this.results[i][param]);
+			}
+			return arr;
+		}
+		this.parameters = $.extend({}, parameters);
+		this.options = $.extend({onComplete: function(results){}, onUpdate: function(){}}, options);
 
-		function fill(){
-			for(var i = 0;i<self.query.length;i++){
-				for(var j =0; j<self.query[i][1].length; j++){
-					self.query[i][1][j] = self.parameters[self.query[i][1][j]] || self.query[i][1][j];
-					if(typeof self.query[i][1][j] == "string" && self.query[i][1][j].charAt(0) != '?')
+		//replace prefilled parameters or subsitute jOWl objects
+		function fill(query, parameters){
+			for(var i = 0;i<query.length;i++){
+				for(var j =0; j<query[i][1].length; j++){
+					query[i][1][j] = parameters[query[i][1][j]] || query[i][1][j];
+					if(typeof query[i][1][j] == "string" && query[i][1][j].charAt(0) != '?')
 					{
-						self.query[i][1][j] = jOWL(self.query[i][1][j]);
+						query[i][1][j] = jOWL(query[i][1][j]);
 					}
 				}				
 			}
 		}
 
-        this.parse = function(syntax, parameters){
-			 this.parameters = $.extend({}, parameters);			 		 
+		function sort(a, b){ 
+			var avar = 0;	for(var i = 0;i<a[1].length;i++){ if(typeof a[1][i] == 'string') avar++;}
+			var bvar = 0;	for(var i = 0;i<a[1].length;i++){ if(typeof b[1][i] == 'string') bvar++;}
+			if(avar != bvar) return avar - bvar;
+			if(a[0] == 'Type' && b[0] != 'Type') return -1;
+			if(a[0] != 'Type' && b[0] == 'Type') return 1;
+			return 0;		
+		}
+
+		function parse(syntax){
              var r2 = /(\w+)[(]([^)]+)[)]/
              var entries = syntax.match(/(\w+[(][^)]+[)])/g);
 			 if(!entries) return this.error =  "invalid abstract sparql-dl syntax";
+			 entries = entries.unique();
              for(var i = 0;i<entries.length;i++){
                 var y = entries[i].match(r2); if(y.length != 3) return this.error = "invalid abstract sparql-dl syntax";
                 entries[i] = [y[1], y[2].replace(/ /g, "").split(',')];
              }
-             this.query = entries;
-			 //replace prefilled parameters	
-			 fill();
+             return entries;
 			 //sort query for ...
-        }		
+        }	
+		//takes into account intersectionOf information when querying for type, more advanced reasoning
+		function expandQuery(){
+			var newquery = [], dupecheck = []; var expansion = [], count = 0;
+			for(var i = 0;i<self.query.length;i++){
+				if(self.query[i][0] == 'Type'){
+					var remove = false;
+					var cl = self.query[i][1][1];
+					if(typeof cl != 'string'){
+						var inters = jOWL.XPath("owl:intersectionOf", cl.jnode);
+						if(inters.length){	
+							remove = true;
+							$(inters).children().each(function(){
+								if(this.nodeName == 'owl:Class'){ 
+									var syntax = "Type("+self.query[i][1][0]+", "+$(this).RDF_About()+")";
+									if($.inArray(syntax, expansion) == -1) expansion.push(syntax);
+									}
+								else if(this.nodeName == 'owl:Restriction'){
+									var restr = new jOWL.Ontology.Criterium($(this));
+									if(restr.target){ 
+										var syntax = "PropertyValue("+self.query[i][1][0]+", "+restr.property.name+", "+restr.target+")";
+										if($.inArray(syntax, expansion) == -1) expansion.push(syntax);}
+								}
+							});							
+							}
+						}
+					if(remove){
+							var t = count;
+							for(var k = 0+t;k<expansion.length;k++){
+								count++;
+								var n = parse(expansion[k]); fill(n, self.parameters);
+								newquery.push(n[0]);
+							}		
+						}
+					else newquery.push(self.query[i]);
+				}
+				else newquery.push(self.query[i]);
+			}
+			return newquery;
+		}
+
+        	
 		/** 
-		if(options.async == false) then this method return the result of options.onComplete, 
+		if(options.async == false) then this method returns the result of options.onComplete, 
 		no matter what, result is always passed in options.onComplete
 		*/
         this.execute = function(options){
 			this.options = $.extend(this.options, options);
-			var i = 0; var resultobj = { partial : [], param : {}};
+			if(options.expandQuery) this.query = expandQuery();
+			var i = 0; var resultobj = this.result;
 			var loopoptions = $.extend(options, { onComplete: function(results){	i++; resultobj = results; loop(i);} });			
 
             if(!this.query.length) {
@@ -974,6 +1036,7 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 		/** results are passed in the options.onComplete function */
 		function process(entry, resultobj, options){
 			var options = $.extend({chewsize: 10, async : true, onUpdate : function(result){}, onComplete : function(results){}}, options);
+			var sizes = {"Type": 2, "PropertyValue" : 3};			
 
 			function merge(results, resultobj, variable){
 				if(resultobj.param[variable] != undefined){
@@ -995,18 +1058,18 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 			}
 
 			function error(msg){ resultobj.error = msg; return options.onComplete(resultobj);}
+
+			if(!sizes[entry[0]]) return error("'"+entry[0]+"' queries are not implemented");
+			if(sizes[entry[0]] != entry[1].length) return error("invalid SPARQL-DL "+entry[0]+" specifications, "+sizes[entry[0]]+" parameters required");
 			
 			if(entry[0] == 'Type'){
-				if(entry[1].length != 2) return error("invalid SPARQL-DL Type specifications, two parameters required");
-
 				if(typeof entry[1][0] == 'string' && typeof entry[1][1] == 'string'){//both undefined, work with previous queries
-				
+					return error("not implemented yet");
 				}
 				else if(typeof entry[1][1] == 'string'){//get class
-					var variable = entry[1][1]; 
 					if(entry[1][0].type != 'owl:Thing') return error("First parameter in SPARQL-DL Query for Type must be an owl:Thing");
-					var r = {};	r[variable] = entry[1][0].owlClass();
-					return options.onComplete(merge(r, resultobj, variable));
+					var r = {};	r[entry[1][1]] = entry[1][0].owlClass();
+					return options.onComplete(merge(r, resultobj, entry[1][1]));
 				}
 				else if(typeof entry[1][0] == 'string'){//get instances
 					var variable = entry[1][0]; //remember the variable
@@ -1035,6 +1098,7 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 							},
 							chewsize : options.chewsize,					
 							async : options.async,
+							onUpdate : function(results){ options.onUpdate(results); },
 							onComplete : function(results){ options.onComplete(merge(results, resultobj, variable));	}
 							});
 						t.start(0, options.chewsize);
@@ -1045,8 +1109,6 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 				
 			}// end type
 			else if(entry[0] == 'PropertyValue'){
-				if(entry[1].length != 3) return error("invalid SPARQL-DL PropertyValue specifications, three parameters required");
-
 				var source = entry[1][0], S = (typeof source != 'string'), pS = (resultobj.param[source] != undefined);
 				var property = entry[1][1], P = (typeof property != 'string'), pP = (resultobj.param[property] != undefined);
 				var target = entry[1][2], T = (typeof target != 'string'), pT = (resultobj.param[target] != undefined);
@@ -1073,10 +1135,11 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 				}
 				return error('not implemented yet');
 			}// end PropertyValue
-			else {return error(entry[0]+' queries are not implemented.');}
 		}
 
-        if(syntax) this.parse(syntax, parameters);
+		this.query = parse(syntax);
+		fill(this.query, this.parameters);
+		this.query = this.query.sort(sort);
         return this;
     }
 

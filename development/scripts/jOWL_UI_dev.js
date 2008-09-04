@@ -77,14 +77,6 @@ $.fn.extend({
 
 			return this;
 		},
-		owl_custom : function(func){
-			var self = this;
-			jOWL.UI.asBroadcaster(this);
-			this.propertyChange = function(item){
-				func(item, self);
-			}
-			return this;
-		},
 		/** 
 		options: 
 			time: responsetime to check for new keystrokes, default 500
@@ -216,101 +208,6 @@ $.fn.extend({
 			return this;
 		},
 		/** 
-		Displays individuals found with a form, with tooltip functionality, in development
-		options:
-			html: function, with one argument == owl:Thing, needs to return an array of DOMElements, see jOWL.UI.valueRestrictions
-			tooltip: show valuerestrictions when hovering over the result, true/false
-		needed options:
-			showtype
-			tooltip yes/no
-		*/
-		owl_formResults : function(owl_form, options){
-			options = $.extend({expandChildren: true, childDepth: 4, tooltip : true,
-				html : jOWL.UI.valueRestrictions
-				}, options);
-			this.addClass('owl_indiv2 owl_UI');
-			var self = this; //needs improvement
-				var header = options.header || $('#resultheader', self);
-				var loader = options.loader || $('#resultloader', self);
-				var content = options.content || $('#results', self);
-				var count = options.count ||  $('#resultcount', self);
-			jOWL.UI.asBroadcaster(this);
-			if(owl_form) owl_form.addListener(this);
-			function setHeader(criteria){
-				var h = "none selected."; 
-				if(criteria.length > 0 ) {
-					h = []; 
-					$.each(criteria, function(){
-						h.push("&lt;<b>"+this.property.name+'</b>&gt;'+' '+this.target.name);}); 
-					h = h.join(', '); }
-				header.html("<div>Selected Restrictions:</div>"+h);
-			}
-
-			function setResults(results){
-				loader.hide();
-				if(results.size() == 0) { content.append("No Results found matching your criteria."); return; }
-				var resultlist = $('<ul/>').appendTo(content).css("width", "75%");
-				results.each(function(thing, i){
-					var th = thing.bind($('<li/>')).appendTo(resultlist); 
-					if(options.tooltip && th.tooltip) th.tooltip({ title: thing.label(),	html : function(){ return options.html(thing);	} }); //end tooltip						
-					else th.append(options.html(thing));
-				});
-				count.html('Results found: <b>'+results.size()+'</b>');
-
-			}
-
-			options.onLoad = setResults;
-
-			this.propertyChange = function(item){					
-					if(item.criteria) setHeader(item.criteria);
-					content.empty();
-					loader.show("normal", function(){ jOWL.getIndividuals(item.concept, item.criteria, options);}); 
-					}
-
-			return this;
-		},
-		/**
-		options
-			button: jquery element that will act as button
-		*/
-		owl_form : function(options){
-			options = $.extend({}, options);
-			this.addClass("owl_form owl_UI");
-			var content = jOWL.UI.getDiv("owl_UI_content", this);
-			var button = options.button || jOWL.UI.getDiv("owl_UI_form_button", this, true);				
-			
-			jOWL.UI.asBroadcaster(this);
-			var self = this;
-			this.concept = options.object || null;
-
-			this.propertyChange = function(item){
-					if(item.type == 'owl:Class') { self.concept = item; }
-				};
-
-			this.addSelect = function(criterium){
-				var property = criterium.property;
-				var targets = criterium.getTargets();
-				if(targets){ 
-					var div = $('<div/>').append(property.bind($("<div/>").css({color: "rgb(0, 94, 205)", cursor: "pointer"})).click(function(){$(this).parent().remove();}));
-					var select = $('<select/>').css('width', 120); $.data(select.get(0), "OWL", property)
-					targets.each(function(target, i){ 
-						var html = $('<option/>'); select.append(target.bind(html)); $.data(html.get(0), "OWL", target);
-						});
-					content.append(div.append(select));
-				}
-			}
-			function doSubmit(){
-				var criteria =[];
-				$('select', self).each(function(){ criteria.push({ property : $.data(this, "OWL"), target : $.data(this[this.selectedIndex], "OWL")}); });
-				self.broadcast({ concept: self.concept, criteria : criteria});
-				return criteria;
-			}
-			button.click(function(){ doSubmit(); });
-
-			return this;
-		
-		},
-		/** 
 		options:
 		rootThing: true/false - default false; if true then topnode is (owl) 'Thing'
 		isStatic: true/false - default false; if static then selections will refresh the entire tree
@@ -431,7 +328,8 @@ $.fn.extend({
 	*/
 	owl_propertyLens : function(options){
 
-		this.options = $.extend(true, {
+		var self = this;
+		self.options = $.extend({
 			hideEmptyFields : true,
 			onUpdate : function(item){}, 
 			split : {'owl:disjointWith' : ', '}, 
@@ -439,11 +337,11 @@ $.fn.extend({
 			click : {'owl:disjointWith': true },
 			label : {},
 			tooltip : {} //jquery element or owl ui component
-			}, options);
+			}, options); 
 		/** determine what this component will respond to, default = owl:Class */
-		this.options.type = ((this.hasClass('resourcebox')) ? this.attr("data-jowl") : $('.resourcebox', this).attr("data-jowl")) || this.options.type || "owl:Class";
-
-		var self = this;
+		self.options.type = ((this.hasClass('resourcebox')) ? this.attr("data-jowl") : $('.resourcebox', this).attr("data-jowl")) || this.options.type || "owl:Class";
+		
+		
 		var backlink = $('<div class="backlink jowl_link"/>').text("Back").hide();
 		this.originalContent = this.wrapInner($("<div/>")).children().remove();
 		this.content = this.originalContent; 
@@ -452,7 +350,7 @@ $.fn.extend({
 
 		jOWL.UI.asBroadcaster(this);
 		/** */
-		this.formatHTML = function(element, results, source){
+		this.formatHTML = function(element, results, source){ 
 			if(results.length === 0) return false;
 			var type = element.attr('data-jowl');
 			var splitter = self.options.split[type] || ', ';
@@ -487,8 +385,8 @@ $.fn.extend({
 			if(!self.options.click[type] && !self.options.tooltip[type]) return  false;
 			var n = jOWL(target.URI); if(!n) return  false;
 			//check if tooltip matches type of object
-			if(self.options.tooltip[n.type]){
-				element.addClass("jowl_tooltip").tooltip({ title: entry.label, body: self.options.tooltip[n.type], object: n, html: tooltipHTML });					
+			if(self.options.tooltip[n.type]){ 
+				element.addClass("jowl_tooltip").tooltip({ title: target.label, body: self.options.tooltip[n.type], object: n, html: tooltipHTML });					
 			}
 			else if(self.options.click[type]){
 				if(self.options.type && self.options.type != n.type) return;
@@ -549,6 +447,10 @@ $.fn.extend({
 								return {label: label, URI: URI};
 							});			
 			},
+			"rdf:type" : function(jOWLelement){
+				if(jOWLelement.owlClass) return [{label: jOWLelement.owlClass().name, URI:jOWLelement.owlClass().URI}];
+				return [{label: jOWLelement.type}];
+			},
 			"rdf:ID" : function(jOWLelement){ return [{label: jOWLelement.name, URI: jOWLelement.URI}]; },
 			"rdfs:label" : function(jOWLelement){ return [{label: jOWLelement.label(), URI: jOWLelement.URI}]; },
 			"owl:Thing" : function(jOWLelement){ 
@@ -556,6 +458,7 @@ $.fn.extend({
 				var map = [];
 				new jOWL.SPARQL_DL("Type(?x, concept)", {"concept": jOWLelement})
 					.execute({childDepth : 1, async: false, onComplete : function(r){
+						console.log(r);
 						map = $.map(r.results, function(n, i){return { label : n["?x"].label(), URI : n["?x"].name }; });
 				}}); 
 				return map;
@@ -617,7 +520,7 @@ $.fn.extend({
 					return false;
 				},
 			"terms" : function(jOWLelement){
-				return $.map(jOWLelement.terms(), function(n, i){return {label: n[i][0], URI: n[i][1]};})
+				return $.map(jOWLelement.terms(), function(n, i){return {label: n[0], URI: n[1]};})
 				},
 			"permalink" : function(jOWLelement){
 				var href = jOWL.permalink(jOWLelement);
@@ -635,7 +538,7 @@ $.fn.extend({
 			
 		}
 
-		this.propertyChange = function(item){			
+		this.propertyChange = function(item){	
 			if(item.type != self.options.type) return;
 			if(backlink.source != item.name) { backlink.hide(); } else backlink.source = false; 
 			this.empty().append(self.content.clone(true)).append(backlink);
