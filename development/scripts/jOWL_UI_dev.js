@@ -324,233 +324,183 @@ $.fn.extend({
 			}// end Tree
 			return tree;
 		},
-	/** Uses templating 	
-	*/
-	owl_propertyLens : function(options){
+/** Uses templating 	
+options: 
+onChange: owl:Class, owl:Thing, etc...
+"data-jowl" : {split: ",  "} ( example: "rdfs:label" : {split: ",  "} )
+onUpdate: called when propertyChange
+*/
+		owl_propertyLens : function(options){
+			var self = this;
+			this.options = $.extend({split: {}, disable : {}, click : {}}, options);
+			this.resourcetype = this.attr('data-jowl') || "owl:Class";
+			var pboxes = $('.propertybox', this).hide();
+			var backlink = $('.backlink', this).hide();
+			if(!backlink.length) backlink = $('<div class="backlink jowl_link"/>').text("Back").hide().appendTo(this);
+			jOWL.UI.asBroadcaster(this);
 
-		var self = this;
-		self.options = $.extend({
-			hideEmptyFields : true,
-			onUpdate : function(item){}, 
-			split : {'owl:disjointWith' : ', '}, 
-			disable : {},
-			click : {'owl:disjointWith': true },
-			label : {},
-			tooltip : {} //jquery element or owl ui component
-			}, options); 
-		/** determine what this component will respond to, default = owl:Class */
-		self.options.type = ((this.hasClass('resourcebox')) ? this.attr("data-jowl") : $('.resourcebox', this).attr("data-jowl")) || this.options.type || "owl:Class";
-		
-		
-		var backlink = $('<div class="backlink jowl_link"/>').text("Back").hide();
-		this.originalContent = this.wrapInner($("<div/>")).children().remove();
-		this.content = this.originalContent; 
-		this.empty();
-		this.addClass("owl_UI");
-
-		jOWL.UI.asBroadcaster(this);
-		/** */
-		this.formatHTML = function(element, results, source){ 
-			if(results.length === 0) return false;
-			var type = element.attr('data-jowl');
-			var splitter = self.options.split[type] || ', ';
-			
-			if(element.get(0).nodeName == "INPUT"){
-					if(element.attr("type") != "text") return false;
-					if(typeof splitter != "string") splitter = ", ";				
-					element.val($.map(results, function(n){ return n.label; }).join(splitter));
-				}
-			else if(element.get(0).nodeName == "TEXTAREA"){
-					if(typeof splitter != "string") splitter = ", ";
-					element.val($.map(results, function(n){ return n.label; }).join(splitter));
-				}
-			else for(var i=0;i<results.length;i++){
-					var el = false;
-					if(results.length == 1){ el = element; element.html(results[i].label); }
-					else if(typeof splitter == 'string')
-					{						
-						el = $("<span/>").html(results[i].label).appendTo(element);
-						if(i<results.length-1) element.append($("<span/>").text(splitter));
-					}
-					//assume splitter is jquery object
-					else { el = splitter.clone('true').html(results[i].label).appendTo(element); }
-
-					self.link(el, results[i], source, type);
-				}
-				return true;
-		}
-		/** create tooltip or fire change with potential backlink	*/
-		this.link = function(element, target, source, type){
-			if(!target.URI) return false;
-			if(!self.options.click[type] && !self.options.tooltip[type]) return  false;
-			var n = jOWL(target.URI); if(!n) return  false;
-			//check if tooltip matches type of object
-			if(self.options.tooltip[n.type]){ 
-				element.addClass("jowl_tooltip").tooltip({ title: target.label, body: self.options.tooltip[n.type], object: n, html: tooltipHTML });					
-			}
-			else if(self.options.click[type]){
-				if(self.options.type && self.options.type != n.type) return;
-				element.addClass("jowl_link").click(function(){						
-				self.broadcast(n); self.propertyChange(n); 
-				backlink.show();
+			this.link = function(source, target, htmlel){
+				htmlel.addClass("jowl_link").click(function(){
+				self.broadcast(target); self.propertyChange(target);
 				backlink.source = source.name;
-				backlink.unbind('click').click(function(){ self.broadcast(source); self.propertyChange(source); backlink.hide(); }); });	
-			}
-			else if(self.options.tooltip[type]) {
-				element.addClass("jowl_tooltip").tooltip({title: entry.label, body: self.options.tooltip[type], object: n, html: tooltipHTML });					
-			}
-			function tooltipHTML(){
-				if(this.body.propertyChange) this.body.propertyChange(this.object);
-				return this.body.get(0);					
-			}		
-		}
+				backlink.show().unbind('click').click(function(){					
+					self.broadcast(source); self.propertyChange(source); backlink.hide();
+				});
 
-		function valuebox(propertybox){
-			this.type = this.attr("data-jowl"); if(!this.type) throw "no data-jowl specified";
-			this.format = function(jOWLelement){
-				var fn = self.fn[this.type] || self.fn["default"]; 
-				var results = fn.call(this, jOWLelement);
-				if(results && self.formatHTML(this, results, jOWLelement)) propertybox.show(); 
-			}
-			return this;		
-		}
-		
-		function propertybox(){
-			this.valuebox = valuebox.call($('.valuebox', this), this);
-			if(!this.valuebox.length == 1) throw "invalid valuebox specification";
-			this.format = function(jOWLelement){
-				if(self.options.disable[this.valuebox.type]) this.valuebox.empty();
-				else { this.valuebox.format(jOWLelement);	}
-			}
-			return this;		
-		}
+				});
 
-		
+			}
 
-		this.fn = {
-			/** 
-			should return objects (or array of objects) of the form : {label : "something", URI : "something" },
-			each fn specified here can be overwritten (cfr editablelens), or new ones can be created
-			'this' keyword refers to the valuebox element, has variable 'type'
-			*/
-			"rdfs:comment" : function(jOWLelement){
-				return $.map(jOWLelement.description(), function(n, i){return {label: n}; });
-			},
-			"owl:disjointWith" : function(jOWLelement){
-				if(self.options.type != "owl:Class") return false;
-				var type = this.type;
-				return $.map(
-							jOWL.XPath('*', jOWLelement.jnode).filter(function(){return this.nodeName == type}), 
-							function(n, i){
-								var URI = $(n).RDF_Resource();
-								var label = self.options.label[type] ? jOWL(URI).label() : jOWL.getURIArray(URI)[1].beautify();
-								return {label: label, URI: URI};
-							});			
-			},
-			"rdf:type" : function(jOWLelement){
-				if(jOWLelement.owlClass) return [{label: jOWLelement.owlClass().name, URI:jOWLelement.owlClass().URI}];
-				return [{label: jOWLelement.type}];
-			},
-			"rdf:ID" : function(jOWLelement){ return [{label: jOWLelement.name, URI: jOWLelement.URI}]; },
-			"rdfs:label" : function(jOWLelement){ return [{label: jOWLelement.label(), URI: jOWLelement.URI}]; },
-			"owl:Thing" : function(jOWLelement){ 
-				if(self.options.type != "owl:Class") return false;
-				var map = [];
-				new jOWL.SPARQL_DL("Type(?x, concept)", {"concept": jOWLelement})
-					.execute({childDepth : 1, async: false, onComplete : function(r){
-						console.log(r);
-						map = $.map(r.results, function(n, i){return { label : n["?x"].label(), URI : n["?x"].name }; });
-				}}); 
-				return map;
+			var action = {
+				"rdfs:label": function(item){ return [{"rdfs:label": item.label() }]; },
+				"rdf:ID" : function(item){ return [{"rdf:ID": [item.name, item] }]; },
+				"rdfs:comment" : function(item){
+					return $.map(item.description(), function(n){return {"rdfs:comment":n }});
+					},
+				"rdf:type" : function(item){
+					if(item.owlClass) return [{"rdf:type": item.owlClass() }];
+					return [{"rdf:type": item.type }];
 				},
-			"owl:Restriction" : function(jOWLelement){
-				var content = this.html(); this.empty();
-				if(self.options.type == "owl:Class"){							
-						var sourceof = jOWLelement.valueRestrictions(true);
-						var restrs = [], temp = {}, props = [];
-						/** create an index with key == property */
-						sourceof.each(function(i){
-							if(!temp[i.property.name]) {
-								props.push(i.property);
-								temp[i.property.name] = [{label: i.target, URI: i.target}];
-							}
-							else temp[i.property.name].push({label: i.target, URI: i.target});
-						});
-						/** if multiple targets for a property, remove all 'rdfs:range' targets */
-						for(var y = 0;y<props.length;y++){
-							var arr = temp[props[y].name], arr2 = [];
-							if(arr.length <= 1) break;
-							for(var z = 0;z<arr.length;z++){ 
-								if(arr[z].label != props[y].range) arr2.push(arr[z]);
-							}
-							temp[props[y].name] = arr2;
-						}
-						for(x in temp){
-							var ct = $('<div/>').html(content);
-							self.formatHTML($("[data-jowl=target]", ct), temp[x], jOWLelement);
-							self.formatHTML($("[data-jowl=owl:onProperty]", ct), [{label: x, URI: x}], jOWLelement);
-							restrs.push({ label:ct.children() });
-						}
-						return restrs;
-					} //end owl:Class
-				else if(self.options.type == "owl:Thing"){
-						var tmp = [];
-						var sourceof = jOWLelement.valueRestrictions(true).JSON();
-						for(x in sourceof){
-							var ct = $('<div/>').html(content);
-							var syntax = "";
-							if(x == 'img'){ ct.html('<img src="'+sourceof[x]+'"/>'); }
-							else {
-								var temp = [];
-								if(typeof sourceof[x] == "string"){
-									temp.push({label: sourceof[x].beautify(), URI: sourceof[x]});
-									}
-								else {
-									for(var i = 0;i<sourceof[x].length;i++){
-									temp.push({label: sourceof[x][i].beautify(), URI: sourceof[x][i] });
-									}
-								}
-								self.formatHTML($("[data-jowl=target]", ct), temp, jOWLelement);
-								self.formatHTML($("[data-jowl=owl:onProperty]", ct), [{label: x, URI: x}], jOWLelement);
-							}
-							tmp.push({label: ct.children()  });
-						}
-						return tmp;					
+				"term" : function(item){
+					return $.map(item.terms(), function(n, i){ return { "term" : [n[0], item] }; });
+				},
+				"rdfs:range": function(item){if(item.range) return [{"rdfs:range": item.range }]},
+				"rdfs:domain": function(item){if(item.domain) return [{"rdfs:domain": item.domain }]},
+				"permalink": function(item){
+					var href = jOWL.permalink(item);
+					return [{"permalink": "<a href='"+href+"'>Permalink</a>" }];
+				},
+				"owl:disjointWith": function(item){
+					if(item.type != "owl:Class") return; 
+					return $.map(
+							jOWL.XPath('*', item.jnode)
+								.filter(function(){return this.nodeName == "owl:disjointWith"}), 
+							function(n, i){ return {"owl:disjointWith": jOWL($(n).RDF_Resource())};
+							});	
+				},
+				"default" : function(item){
+					var type = this.attr("data-jowl");
+					return $.map(
+								jOWL.XPath('*', item.jnode).filter(function(){return this.nodeName == type}),
+								function(n, i){ var x = {}; x[type] = $(n).text(); return x; }
+								);	
+				}
+			}
+
+			this.propertyChange = function(item){
+				if(backlink.source != item.name) { backlink.hide(); } else backlink.source = false; 
+				if(item.type != self.resourcetype){
+					if(item.type == 'owl:DatatypeProperty' && self.options.type == "rdf:Property") {}
+					else if(item.type == 'owl:ObjectProperty' && self.options.type == "rdf:Property"){}
+					else return;
 					}
-					return false;
-				},
-			"terms" : function(jOWLelement){
-				return $.map(jOWLelement.terms(), function(n, i){return {label: n[0], URI: n[1]};})
-				},
-			"permalink" : function(jOWLelement){
-				var href = jOWL.permalink(jOWLelement);
-				var content = (this.get(0).nodeName == "A") ? this.attr('href', href).text() : $('<a/>').attr('href', href).text("Permalink");
-				return [{label: content }];
-				},
-			//for example for custom annotation properties
-			"default" : function(jOWLelement){
-				var type = this.type;
-				return $.map(
-							jOWL.XPath('*', jOWLelement.jnode).filter(function(){return this.nodeName == type}),
-							function(n, i){ var txt = $(n).text(); return {label: txt, URI: txt}; }
-							);	
-			}
-			
-		}
+				
+				
+				function complete(nodes){
+					if(!nodes.length) return;  
+					for(x in self.options.onChange){						
+						var data = $('[typeof='+x+']', nodes).add(nodes.filter('[typeof='+x+']'));
+						data.each(function(){
+							var node = $(this);
+							self.options.onChange[node.attr('typeof')].call(node, item, jOWL(node.attr('title')), self);
+						})
+						
+					}
+				}
 
-		this.propertyChange = function(item){	
-			if(item.type != self.options.type) return;
-			if(backlink.source != item.name) { backlink.hide(); } else backlink.source = false; 
-			this.empty().append(self.content.clone(true)).append(backlink);
-			var boxes = $('.propertybox', this); 
-			if(self.options.hideEmptyFields) { boxes.hide(); }
-			boxes.each(function(){	propertybox.call($(this)).format(item); });
-			self.options.onUpdate(item);		
-			}//end propertyChange
+
+				pboxes.hide().each(function(){
+					var pbox = $(this), count = 0;
+					var actiontype = false, datajowl, descendant = false, results;
+					var valueb = $('[data-jowl]', pbox);
+					if(!valueb.length){	datajowl = pbox;}
+					else if(valueb.length == 1){ datajowl = valueb;	descendant = true; }
+					else return;
+					actiontype = datajowl.attr('data-jowl'); if(!actiontype) return;
+					if(self.options.disable[actiontype]) return;
+					if(!self.options[actiontype]) self.options[actiontype] = {};
+					if(actiontype.indexOf("sparql-dl:") === 0){
+						var query = actiontype.split("sparql-dl:", 2)[1];
+						var fill = {}; fill[self.resourcetype] = item;
+						new jOWL.SPARQL_DL(query, fill).execute({onComplete : function(r){
+							if(self.options[actiontype].sort) r.sort(self.options[actiontype].sort);
+							var nodes = jOWL.UI.Template(r.results, datajowl, self.options[actiontype].split);							
+							complete(nodes);
+							if(nodes.length && descendant) { pbox.show();valueb.hide(); }							
+							}});
+					}
+					else {
+						var choice = (action[actiontype]) ? actiontype : "default";
+						results = action[choice].call(datajowl, item);
+						var nodes = jOWL.UI.Template(results, datajowl, self.options[actiontype].split);
+						complete(nodes);
+						if(nodes.length && descendant) {pbox.show();valueb.hide();}
+					}
+					});
+					
+					if(self.options.onUpdate) self.options.onUpdate(item);
+				}
+		
+		if(self.options.tooltip){
+			var lens = this.remove();
+			this.display = function(element, htmlel){
+				htmlel.tooltip({
+					title: element.label(), 
+					html: function(){	lens.propertyChange(element); return lens.get(0); }
+				}); 
+			}
+		}			
+
 		return this;
-		}
+		}	
 
 		});
+
+/**arr: associative array of variablrd, jqel: node for which variables need to be substituted,  */
+jOWL.UI.Template = function(arr, jqel, splitter){
+	if(!arr) return;
+	function removePrev(jqel){
+		var prev = jqel.prev('.owl_UI_template_result');
+		if(!prev.length){prev = jqel.prev('.owl_UI_template_splitter');}
+		if(prev.length) { prev.remove(); removePrev(jqel); }		
+	}
+	removePrev(jqel);
+
+	function bindObject(value, jnode){
+		var bound = false; 
+		if(!value) return false;
+		if(typeof value == 'string') { jnode.html(value); bound = true;}
+		else if(value.constructor == Array){ 
+			if(value.length == 2) { value[1].bind(jnode).text(value[0]); bound = true;	} 
+			}
+		else if(value.bind){ value.bind(jnode); bound = true; }
+		return bound;
+	}
+	var count = 0, a = [];
+	for(var i=0;i<arr.length;i++){
+		var x = jqel.clone(true).wrapInner("<"+jqel.get(0).nodeName+" class='owl_UI_template_result'/>").children();
+		/** copy style settings */
+			x.addClass(jqel.attr('class')).removeClass('propertybox');
+		/** accepted obj types= string, array["string", "jowlobject"], jowlobject*/
+		for(obj in arr[i]){
+			var occurrences = $(':contains(${'+obj+'})', x);
+			if(!occurrences.length){
+				if(x.text() == "${"+obj+"}") { if(bindObject(arr[i][obj], x)) count++;}
+			}
+			else occurrences.each(function(){	
+				if(this.innerHTML == "${"+obj+"}") {	if(bindObject(arr[i][obj], $(this))) count++;	}
+			});			
+		}
+		if(count) {
+			x.insertBefore(jqel); a.push(x.get(0));
+			if(count > 1 && splitter) { 
+				if(splitter.indexOf('<') == 0) $(splitter).addClass('owl_UI_template_splitter').insertBefore(x);
+				else $("<span class='owl_UI_template_splitter'/>").text(splitter).insertBefore(x);
+				}
+		}
+	}
+	return $(a);
+}
 /** 
 Supporting functionality
 */

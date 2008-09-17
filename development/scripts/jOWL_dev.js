@@ -72,463 +72,484 @@ jOWL.XPath = function(selector, elem){
 	if($.browser.msie) return $($.makeArray(arr)); return $(arr); //this is needed for IE, it returns a length of 1 on empty node array
 }
 
-jOWL.Ontology = {
+/** access to the owl:Ontology element */
+jOWL.Ontology = function(){
+	var ontology = function(){};
+	ontology.inherit = jOWL.Ontology.internal; ontology.inherit(jOWL.XPath("/rdf:RDF/owl:Ontology"));
+	return ontology;
+}
 	
-	internal : function(jnode){			
-		/** Resolving the identity */
-		var identifier;
-		if(typeof jnode == 'string') { identifier = jnode; jnode = $();  }
-		else { identifier = jnode.RDF_ID() || jnode.RDF_About() || "anonymousOntologyObject"; 	}
-		identifier = jOWL.resolveURI(identifier);
-		this.isExternal = jOWL.isExternal(identifier);				
-		if(this.isExternal) {this.baseURI = this.isExternal[0]; this.name = this.isExternal[1]; this.URI = this.baseURI+this.name; }
-		else {	this.baseURI = jOWL.namespace; this.name = identifier; this.URI = this.name; }
-		/** resolved */
-		this.jnode = jnode;
-		this.type = jnode.get(0).nodeName;
-		/** description returns an array */
-		this.description = function(){
-			var comment = jOWL.XPath('rdfs:comment', this.jnode);
-			return $.map(comment, function(n, i){ return $(n).text();});
+jOWL.Ontology.internal = function(jnode){			
+	/** Resolving the identity */
+	var identifier;
+	if(typeof jnode == 'string') { identifier = jnode; jnode = $();  }
+	else { identifier = jnode.RDF_ID() || jnode.RDF_About() || "anonymousOntologyObject"; 	}
+	identifier = jOWL.resolveURI(identifier);
+	this.isExternal = jOWL.isExternal(identifier);				
+	if(this.isExternal) {this.baseURI = this.isExternal[0]; this.name = this.isExternal[1]; this.URI = this.baseURI+this.name; }
+	else {	this.baseURI = jOWL.namespace; this.name = identifier; this.URI = this.name; }
+	/** resolved */
+	this.jnode = jnode;
+	this.type = jnode.get(0).nodeName;
+	/** description returns an array */
+	this.description = function(){
+		var comment = jOWL.XPath('rdfs:comment', this.jnode);
+		return $.map(comment, function(n, i){ return $(n).text();});
+		}
+	/**
+	new since jOWL 0.6
+	returns Array of Arrays, where secondary array is of form: [0] = term, [1] = identifier, [2] = language; [3] = type of object
+	example:
+	[
+	   ["bleu", "blue", "fr", "owl:Class"] //bleu is french for the color 'blue',
+	   ["Blue color", "blue", "fr", "owl:Class"]
+	]
+	*/
+	this.terms = function(){
+		var terms = [], self = this;
+		var type;
+		switch(this.nodeName){
+				case "owl:Class" : type = 'Class'; break;
+				case "owl:ObjectProperty" : type = 'ObjectProperty'; break;
+				case "owl:DatatypeProperty" : type = 'DatatypeProperty'; break;
+				default : type = 'Thing'; break;
 			}
-		/**
-		new since jOWL 0.6
-		returns Array of Arrays, where secondary array is of form: [0] = term, [1] = identifier, [2] = language; [3] = type of object
-		example:
-		[
-		   ["bleu", "blue", "fr", "owl:Class"] //bleu is french for the color 'blue',
-		   ["Blue color", "blue", "fr", "owl:Class"]
-		]
-		*/
-		this.terms = function(){
-			var terms = [], self = this;
-			var type;
-			switch(this.nodeName){
-					case "owl:Class" : type = 'Class'; break;
-					case "owl:ObjectProperty" : type = 'ObjectProperty'; break;
-					case "owl:DatatypeProperty" : type = 'DatatypeProperty'; break;
-					default : type = 'Thing'; break;
-				}
-			if(jOWL.options.dictionary.addID) terms.push([this.name.beautify(), this.URI, jOWL.options.defaultlocale, this.type]);
-			jOWL.XPath('rdfs:label', this.jnode).each(function(){
-				var lbl = $(this);
-				var locale = lbl.attr("xml:lang") || jOWL.options.defaultlocale;
-				var txt = lbl.text();
-				var match = false;
-				for(var i =0;i<terms.length;i++){
-					if(terms[i][0].toUpperCase() == txt.toUpperCase()) 
-						if(terms[i][2] == locale) match = true;
-				} 
-				if(!match) terms.push([lbl.text(), self.URI, locale, self.type]);
-			});
-			return terms;
-		}
-		this.label = function(){
-			var label = false; var match = false;
-			jOWL.XPath('rdfs:label', this.jnode).each(function(){
-				if(match) return; var lnode = $(this);
-				if(jOWL.options.locale) { 
-					var loc = lnode.attr('xml:lang');
-					if(!loc && !label) { label = lnode.text();}
-					if(loc == jOWL.options.locale) { label = lnode.text(); match = true; }
-					}
-			});
-			if(this.type == "owl:Class" || this.type == "owl:Thing") { 
-				if(!label && jOWL.options.niceClassLabels) return this.name.beautify();
-			}
-			if(!label) return this.name;
-			return label;}
-		this.bind = function(jqelem){
-			return jqelem.text(this.label()).attr('typeof', this.type).attr('title', identifier);}
-		},
-	Individual : function(jnode, owlclass){
-		this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
-		this.Class = this.type;
-		if(this.type == "owl:Thing"){
-			var t = jOWL.XPath('rdf:type', this.jnode); if(!t.length) throw "unable to find a Class for the Individual "+this.name;
-			this.Class = $(t[0]).RDF_Resource();
-		}
-		this.type = "owl:Thing";		
-		this.owlClass = function(owlclass){ 
-			if(owlclass) jOWL.data(this.name, "class", owlclass); 
-			else { 
-				var owlclass = jOWL.data(this.name, "class");
-				if(!owlclass) { owlclass = jOWL(this.Class); this.owlClass(owlclass);} 
-				return owlclass;
-				}
-			};
-		if(owlclass) this.owlClass(owlclass);
-		//see if criterium matches restriction - in development, if no restriction specified then all restrictions are returned, as jQuery node array.
-		this.localRestrictions = function(property, target){
-			if(property) {
-				var pnodes = this.jnode.children(property.name);
-				if(!pnodes.length) return false;
-				if(target){
-					var found = false;
-					if(property.type != 'owl:ObjectProperty') { pnodes.each(function(){if($(this).text() == target) found = true; }); }
-					else { 
-						pnodes.each(function(){if($(this).RDF_Resource() == target.name) found = true; });}
-					return found;
-					}
-				return true;
-				}
-			return this.jnode.children().filter(function(){	return (this.prefix != "rdfs" && this.prefix != "rdf");});
-		};
-		//Returns jOWl array
-		this.classRestrictions = function(includeAll){
-			var c = this.owlClass();
-			if(c.valueRestrictions) { var arr = c.valueRestrictions(includeAll); return arr; }
-			return jOWL.Ontology.Array();
-		};
-
-		this.valueRestrictions = function(includeClass, includeValueless){
-			var r = new jOWL.Ontology.Array();
-
-			if(includeClass) this.classRestrictions(includeValueless).each(function(){				
-				if(!r.contains(this)) r.push(this);		});
-
-			this.localRestrictions().each(function(){ 	r.push(new jOWL.Ontology.Criterium($(this)));	});
-			/** convert to JSON format */
-			r.JSON = function(){
-				var entry = {};
-
-				function save(property, target, maxCard){
-					if(!entry[property]) entry[property] = target;
-					else if(maxCard === 1) entry[property] = target;
-					else if(entry[property].constructor == "Array"){
-					var a = entry[property], dupe = false;
-					for(var i =0;i<a.length;a++){
-						if(a[i] == target) { dupe = true; break; }
-					}
-					if(!dupe) entry[property].push(target);
-					}
-					else{
-						if(entry[property] != target) { entry[property] = [entry[property], target]; entry[property].constructor = "Array"; }
-					}
-				}
-
-				r.each(function(){
-					var t = this.target || "Thing";
-					save(this.property.name, t, this.maxCard);
-				});
-				return entry;
-			
-			}
-			return r;
-		}
-	},
-	/** jNode is of type owl:Restriction */
-	Criterium : function(jnode){
-		//private members
-		var jprop, prop, op, restrtype;
-
-		if(jnode.get(0).nodeName != "owl:Restriction"){
-			this.property = jOWL(jnode.get(0).nodeName, {type: "property"});
-			this.target = jnode.RDF_Resource() || jnode.text();
-			restrtype = "Individual";
-		}
-		else
-		{
-			var jprop = jOWL.XPath("owl:onProperty", jnode);
-			var prop = jprop.RDF_Resource(); if(!prop) { throw "no property found for the given owl:restriction"; return null; }
-			var op = jprop.siblings(); var cachedTarget = null;
-			var restrtype = op.get(0).nodeName;
-			this.property = jOWL(prop, {type: "property"});
-			this.target = null; //string only
-		}		
-
-		this.restriction = { minCard: false, maxCard : false, some: [], all : [], value : false };		
-		this.type = jnode.get(0).nodeName;
-		this.bind = function(jqelem){return null;}
-		
-		this.isValueRestriction = (restrtype == 'owl:someValuesFrom' || restrtype == 'owl:allValuesFrom' || restrtype == 'owl:hasValue');
-		this.isCardinalityRestriction = (restrtype == 'owl:cardinality' || restrtype =='owl:maxCardinality' || restrtype =='owl:minCardinality');
-
-		if(!this.property || !restrtype) { throw "badly formed owl:restriction"; return null; }
-		switch(restrtype){
-			case "owl:cardinality": this.restriction.minCard = this.restriction.maxCard = parseInt(op.text()); break;
-			case 'owl:maxCardinality': this.restriction.maxCard = parseInt(op.text()); break;
-			case 'owl:minCardinality': this.restriction.minCard = parseInt(op.text()); break;
-			case 'owl:hasValue': var res = op.RDF_Resource(); if(res) this.target = res; break;
-		}
-		if(this.property.type == "owl:ObjectProperty"){
-				if(this.isCardinalityRestriction && this.property.range) this.target = this.property.range;
-				else if(this.isValueRestriction) this.target = op.RDF_Resource();
-			}
-		
-		
-		this.getTarget = function(){
-			if(restrtype == "Individual") return this.target;
-			if(this.target == null) return jOWL('Thing');
-			if(!cachedTarget) cachedTarget = jOWL(this.target); return cachedTarget;}
-
-		this.getTargets = function(){
-			var q = this.getTarget(); 
-			if(q.type == "owl:Class") { 
-			return q.individuals().concat(q.children()); 
-			}}		
-		
-		this.merge = function(crit){
-			if(this.isCardinalityRestriction && crit.isValueRestriction ) { this.target = crit.target; return true;}
-			else if(this.isValueRestriction && crit.isCardinalityRestriction) 
-				switch(crit.restrtype){
-				case 'owl:cardinality': this.restriction.minCard = this.restriction.maxCard = crit.restriction.minCard; return true;
-				case 'owl:minCardinality': this.restriction.minCard = crit.restriction.minCard; return true;
-				case 'owl:maxCardinality': this.restriction.maxCard = crit.restriction.maxCard; return true;
-			} return false;
-		}
-		var suffix = this.target || this.restrtype;
-		this.name = this.property.name+'#'+suffix;
-		return this;
-	},
-	DatatypeProperty: function(jnode){
-		var addCache = false; if(jOWL.options.cacheProperties){
-			var res = jnode.RDF_ID() || jnode.RDF_About(); 
-			var c = jOWL.cache.get(res); if(c) return c; }
-		this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
-		this.domain= $(this.jnode.get(0).selectSingleNode('rdfs:domain')).RDF_Resource();
-		this.range = $(this.jnode.get(0).selectSingleNode('rdfs:range')).RDF_Resource();
-		if(addCache) jOWL.cache.push(this);
-	},
-	ObjectProperty: function(jnode){
-		var addCache = false; if(jOWL.options.cacheProperties){
-			var res = jnode.RDF_ID() || jnode.RDF_About();
-			var c = jOWL.cache.get(res); if(c) return c; addCache = true;}
-		this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
-		this.domain= $(this.jnode.get(0).selectSingleNode('rdfs:domain')).RDF_Resource();
-		this.range = $(this.jnode.get(0).selectSingleNode('rdfs:range')).RDF_Resource();
-		if(addCache) jOWL.cache.push(this);
-	},
-	/** consider a better implementation ? */
-	Thing : function(xmlNode){
-		this.inherit = jOWL.Ontology.internal; this.inherit(jOWL.Ontology.Thing.jnode); this.type = false;
-	},
-	Class: function(jnode){
-		this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
-		if(this.type !='owl:Class') throw ("node with nodename "+this.type+" is not an owl:Class");
-		var that = this; 
-
-		/** Get a jOWL.Ontology.Array of parents */
-		this.parents = function(){
-			var oParents = jOWL.data(this.name, "parents");
-			if(oParents) return oParents;
-
-			var temp = [];
-			jOWL.XPath("rdfs:subClassOf", this.jnode).filter(function(){return $(this).RDF_Resource();})
-				.each(function(){temp.push($(this).RDF_Resource()); });
-
-			if(jOWL.options.reason) 
-			{	
-				var arr = jOWL.XPath("rdfs:subClassOf/owl:Restriction/owl:onProperty", this.jnode);
-				var arr2 = jOWL.XPath("owl:intersectionOf/owl:Restriction/owl:onProperty", this.jnode);
-				var arr3 = jOWL.XPath("owl:intersectionOf/owl:Class", this.jnode);
-				var proprefs = arr.add($(arr2));
-					proprefs.each(function(){ 
-						var p = $(this).RDF_Resource();
-						if(p) { var o = jOWL(p, {type: "property"});
-							if(o.domain && o.domain != that.name) temp.push(o.domain);  }}); 
-					$(arr3).each(function(){var p = $(this).RDF_About(); if(p) temp.push(p);  });
+		if(jOWL.options.dictionary.addID && this.name != "anonymousOntologyObject") terms.push([this.name.beautify(), this.URI, jOWL.options.defaultlocale, this.type]);
+		jOWL.XPath('rdfs:label', this.jnode).each(function(){
+			var lbl = $(this);
+			var locale = lbl.attr("xml:lang") || jOWL.options.defaultlocale;
+			var txt = lbl.text();
+			var match = false;
+			for(var i =0;i<terms.length;i++){
+				if(terms[i][0].toUpperCase() == txt.toUpperCase()) 
+					if(terms[i][2] == locale) match = true;
 			} 
-
-			var references = jOWL.getXML(temp.unique()); 
-			oParents = new jOWL.Ontology.Array(references, true);
-			if(!oParents.length){ oParents.push(jOWL('Thing')); }
-			else if(oParents.length > 1) oParents.filter(function(){return this.name != ('Thing');}); //Remove Thing reference if other parents exist
-			jOWL.data(this.name, "parents", oParents);			
-			return oParents;
-			};
-		this.individuals = function(){
-			var arr = new jOWL.Ontology.Array();
-			new jOWL.SPARQL_DL("Type(?x, "+this.name+")").execute({async: false, onComplete: function(r){
-				arr = r.jOWLArray("?x");
-			}});
-			return arr; 
-			}
-		this.children = function(){
-			var oChildren = jOWL.data(this.name, "children");			
-			if(oChildren) return oChildren;
-			var c = new jOWL.Ontology.Array();
-			if(jnode.children().filter(function(){return this.tagName == "owl:oneOf";}).size())return c; 
-			//If OneOfList then only individuals may exist
-			var URI = this.URI;
-			jOWL.index("subClass").filter(function(){return $(this).RDF_Resource(URI);})
-				.each(function(){ c.push(new jOWL.Ontology.Class( $(this.parentNode)) );});
-			if(jOWL.options.reason){
-				//an intersection mentions this as class reference
-				jOWL.index("intersection").each(function(i, item){ 
-					jOWL.XPath('owl:Class', this).each(function(){ 						
-						if($(this).RDF_About(URI)) c.push(new jOWL.Ontology.Class( $(this.parentNode.parentNode)) );
-					}); });
-				//an ObjectProperty mentions this as domain
-				jOWL.index("property").each(function(){
-				if(this.domain == that.name) {
-					var nodes = jOWL.XPath('//owl:onProperty[@rdf:resource="#'+this.name+'"]/parent::owl:Restriction/..');
-					nodes.filter(function(){ return (this.nodeName == 'owl:intersectionOf' || this.nodeName == 'rdfs:subClassOf');
-					}).each(function(){
-						var cl = jOWL($(this.selectSingleNode('parent::owl:Class')));
-						if(!c.contains(cl) && cl.name != that.name && cl.name != undefined) { c.push(cl);}
-						});
-					}
-					});
-			}
-			jOWL.data(this.name, "children", c);
-			return c;
-			};
-		/**Similar to children but get's children of children as well and pumps it into one array. 
-		level: depth to fetch children, Default 5 */
-		this.descendants = function(level){
-			var level = level? level : 5;
-			var oDescendants = jOWL.data(this.name, "descendants");
-			if(oDescendants && oDescendants.level >= level) return oDescendants;
-			oDescendants = new jOWL.Ontology.Array(); oDescendants.level = level; 
-			descend(this, 1);
-			function descend(concept, i){				
-				if(i < level){ 
-				var count = i+1; var ch = concept.children(); oDescendants.concat(ch);
-				ch.each(function(item){ descend(item, count);});
+			if(!match) terms.push([lbl.text(), self.URI, locale, self.type]);
+		});
+		return terms;
+	}
+	this.label = function(){
+		var label = false; var match = false;
+		jOWL.XPath('rdfs:label', this.jnode).each(function(){
+			if(match) return; var lnode = $(this);
+			if(jOWL.options.locale) { 
+				var loc = lnode.attr('xml:lang');
+				if(!loc && !label) { label = lnode.text();}
+				if(loc == jOWL.options.locale) { label = lnode.text(); match = true; }
 				}
-			}			
-			jOWL.data(this.name, "descendants", oDescendants);
-			return oDescendants;
+		});
+		if(this.type == "owl:Class" || this.type == "owl:Thing") { 
+			if(!label && jOWL.options.niceClassLabels) return this.name.beautify();
 		}
-		/**Instead of just getting parents, constructs the entire hierarchy for a class
-		Returns a jOWL.Ontology.Array containing top nodes (classes directly subsumed by 'owl:Thing')
-		each node with exception of the leaves (original concept) has a variable invParents (jOWL.Ontology.Array) with child references
-		if options.prune: cuts down additional redundant information.
-		*/
-		this.hierarchy = function(options){
-			var settings = $.extend({prune: true}, options);
-			var concept = this;
-			var endNodes = new jOWL.Ontology.Array();
-			var index  = new jOWL.Ontology.Array();
-			var pruneIndex = new jOWL.Ontology.Array();
-			traverse(concept);
-			if(settings.prune) endNodes.each(function(item){prune(item);});
+		if(!label) return this.name;
+		return label;}
+	this.bind = function(jqelem){
+		return jqelem.text(this.label()).attr('typeof', this.type).attr('title', identifier);}
+	}
 
-			function traverse(concept){ 
-				var parents = concept.parents();
-				if(parents.size() == 1 && parents.contains('Thing')) { endNodes.pushUnique(concept);}
-				else parents.each(function(){ 		
-						var item = index.pushUnique(this); 
-						if(!item.invParents) item.invParents = new jOWL.Ontology.Array();
-						item.invParents.pushUnique(concept);
-						traverse(item);
-						});					
+/** access to Individuals of the ontology*/
+jOWL.Ontology.Individual = function(jnode, owlclass){
+	this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
+	this.Class = this.type;
+	if(this.type == "owl:Thing"){
+		var t = jOWL.XPath('rdf:type', this.jnode); if(!t.length) throw "unable to find a Class for the Individual "+this.name;
+		this.Class = $(t[0]).RDF_Resource();
+	}
+	this.type = "owl:Thing";		
+	this.owlClass = function(owlclass){ 
+		if(owlclass) jOWL.data(this.name, "class", owlclass); 
+		else { 
+			var owlclass = jOWL.data(this.name, "class");
+			if(!owlclass) { owlclass = jOWL(this.Class); this.owlClass(owlclass);} 
+			return owlclass;
 			}
-
-			function prune(concept){ //will cut down 1 level sibling-child relationships...
-				var temparr = new jOWL.Ontology.Array();
-				var tt = concept.invParents;
-				if(concept.invParents) concept.invParents.filter(function(sibling, i){
-						var rightChild = true;
-						tt.each(function(child){
-							if(child.name != sibling.name){//sibling	
-								if(child.invParents && child.invParents.contains(sibling)) rightChild = false;
-							}
-						}); 
-						if(rightChild) temparr.push(sibling);
-						return rightChild;
-				});		
-				temparr.each(function(item){prune(item);});
+		};
+	if(owlclass) this.owlClass(owlclass);
+	//see if criterium matches restriction - in development, if no restriction specified then all restrictions are returned, as jQuery node array.
+	this.localRestrictions = function(property, target){
+		if(property) {
+			var pnodes = this.jnode.children(property.name);
+			if(!pnodes.length) return false;
+			if(target){
+				var found = false;
+				if(property.type != 'owl:ObjectProperty') { pnodes.each(function(){if($(this).text() == target) found = true; }); }
+				else { 
+					pnodes.each(function(){if($(this).RDF_Resource() == target.name) found = true; });}
+				return found;
 				}
-
-			return endNodes;
-
-		};
-		/**Get a jowl array of criteria - restriction: property + target object, will return true/false if present*/
-		this.sourceof = function(restriction){
-			var self = this, crit = jOWL.data(this.name, "sourceof");				
-			if(!crit) populate();
-			if(restriction){ //check if restriction is present
-				var bool = false; 
-				crit.each(function(item, i){
-					if(item.target == restriction.target.name && item.property.name == restriction.property.name) bool = true;	});
-				if(bool) return true;
-				this.parents().each(function(p){
-						if(!bool && p.sourceof) if(p.sourceof(restriction)) bool = true;
-					});				
-				return bool;
+			return true;
 			}
-
-			function populate(){
-				crit = new jOWL.Ontology.Array();
-				var arr = jOWL.XPath("rdfs:subClassOf/owl:Restriction", jnode)
-					.add(jOWL.XPath("owl:intersectionOf/owl:Restriction", jnode));
-				arr.each(function(index, entry){					
-					var cr = new jOWL.Ontology.Criterium($(entry));  var excrit = false;
-					crit.each(function(item, i){if(item.property.name == cr.property.name) excrit = item;});
-					if(excrit) { if(!excrit.merge(cr)) crit.push(cr); } else crit.push(cr);
-						}); 
-				jOWL.data(self.name, "sourceof", crit);
-				}
-			return crit;
-
-		};
-		/** Get a jOWL array of criteria where the target is an individual, not a class or undefined*/
-		this.valueRestrictions = function(includeAll){	
-			var r = new jOWL.Ontology.Array();
-			this.sourceof().each(function(item){ 				
-				var targ = item.getTarget();
-				if(targ && item.isValueRestriction) r.push(item);
-				else if(includeAll) r.push(item);
-				});
-
-			this.parents().each(function(p){
-				if(p.valueRestrictions) {
-					p.valueRestrictions(includeAll).each(function(i){ if(!r.contains(i)) r.push(i);	}); //don't add duplicates
-				}
-				});
-			return r;
-		}
-	},
-	Array: function(arr, isXML){
-		var self = this;
-		var items = [];
-		if(arr){
-			if(isXML) $.each(arr, function(){items.push(jOWL($(this)));}); 
-			else items = arr;
-		}
-		this.length = items.length;
-		this.bind = function(listitem, processf){
-			var tt = [];
-			this.each(function(item, i){ 
-				var syntax = listitem ? listitem.clone(true) : $('<span/>');
-				var html  = item.bind(syntax).append(document.createTextNode(' '));
-				if(processf) processf(html, item);
-				tt.push(html.get(0));
-			}); return tt;
-		};
-		this.each = function(func, reverse){
-			if(reverse) for(var i=items.length - 1; i>=0;i--){ (function(){var item = items[i]; func.call(item, item, i);})();} 
-			else for(var i=0;i<items.length;i++){ (function(){var item = items[i]; func.call(item, item, i);})();}
-			return this;
-		};
-		this.concat = function(arr){items = items.concat(arr.getItems()); this.length = items.length; return this;}
-		this.filter = function(f){
-			this.each(function(item, i){var q = f.call(item, item, i); if(!q) items.splice(i, 1);}, true);
-			this.length = items.length;
-			return this;
-			}
-		this.get = function(object){
-			if(typeof object == 'number') return items[object];
-			var match = typeof object == "string" ? object : object.name;	
-			var found  = false; 
-			this.each(function(){ if(this.name == match) {found = this;}}); 
-			return found;
-			}
-		this.contains = function(object){
-			var match = typeof object == "string" ? object : object.name; if(this.get(match)) return true; 
-			return false; }
-		this.push = function(obj) {items.push(obj); self.length = items.length; return self;}
-		this.pushUnique = function(obj){
-			var entry = this.get(obj);
-			if(!entry){ this.push(obj); entry = this.get(obj);}
-			return entry;
-		}
-		this.size = function(){return this.length;}
-		this.getItems = function(){return items;}	}
-	
+		return this.jnode.children().filter(function(){	return (this.prefix != "rdfs" && this.prefix != "rdf");});
 	};
+	//Returns jOWl array
+	this.classRestrictions = function(includeAll){
+		var c = this.owlClass();
+		if(c.valueRestrictions) { var arr = c.valueRestrictions(includeAll); return arr; }
+		return jOWL.Ontology.Array();
+	};
+
+	this.valueRestrictions = function(includeClass, includeValueless){
+		var r = new jOWL.Ontology.Array();
+
+		this.localRestrictions().each(function(){ 
+			var crit = new jOWL.Ontology.Criterium($(this));	if(!r.contains(crit)) r.push(crit);	
+			});
+
+		if(includeClass) this.classRestrictions(includeValueless).each(function(){				
+			if(!r.contains(this)) r.push(this);		});
+		
+		/** convert to JSON format */
+		r.JSON = function(){
+			var entry = {};
+
+			function save(property, target, maxCard){
+				if(!entry[property]) entry[property] = target;
+				else if(maxCard === 1) entry[property] = target;
+				else if(entry[property].constructor == "Array"){
+				var a = entry[property], dupe = false;
+				for(var i =0;i<a.length;a++){
+					if(a[i] == target) { dupe = true; break; }
+				}
+				if(!dupe) entry[property].push(target);
+				}
+				else{
+					if(entry[property] != target) { entry[property] = [entry[property], target]; entry[property].constructor = "Array"; }
+				}
+			}
+
+			r.each(function(){
+				var t = this.target || "Thing";
+				save(this.property.name, t, this.maxCard);
+			});
+			return entry;
+		
+		}
+		return r;
+	}
+}
+
+/** jNode is of type owl:Restriction */
+jOWL.Ontology.Criterium = function(jnode){
+	//private members
+	var jprop, prop, op, restrtype;
+
+	if(jnode.get(0).nodeName != "owl:Restriction"){
+		this.property = jOWL(jnode.get(0).nodeName, {type: "property"});
+		this.target = jnode.RDF_Resource() || jnode.text();
+		restrtype = "Individual";
+	}
+	else
+	{
+		var jprop = jOWL.XPath("owl:onProperty", jnode);
+		var prop = jprop.RDF_Resource(); if(!prop) { throw "no property found for the given owl:restriction"; return null; }
+		var op = jprop.siblings(); var cachedTarget = null;
+		var restrtype = op.get(0).nodeName;
+		this.property = jOWL(prop, {type: "property"});
+		this.target = null; //string only
+	}		
+
+	this.restriction = { minCard: false, maxCard : false, some: [], all : [], value : false };		
+	this.type = jnode.get(0).nodeName;
+	this.bind = function(jqelem){return null;}
+	
+	this.isValueRestriction = (restrtype == 'owl:someValuesFrom' || restrtype == 'owl:allValuesFrom' || restrtype == 'owl:hasValue');
+	this.isCardinalityRestriction = (restrtype == 'owl:cardinality' || restrtype =='owl:maxCardinality' || restrtype =='owl:minCardinality');
+
+	if(!this.property || !restrtype) { throw "badly formed owl:restriction"; return null; }
+	switch(restrtype){
+		case "owl:cardinality": this.restriction.minCard = this.restriction.maxCard = parseInt(op.text()); break;
+		case 'owl:maxCardinality': this.restriction.maxCard = parseInt(op.text()); break;
+		case 'owl:minCardinality': this.restriction.minCard = parseInt(op.text()); break;
+		case 'owl:hasValue': var res = op.RDF_Resource(); if(res) this.target = res; break;
+	}
+	if(this.property.type == "owl:ObjectProperty"){
+			if(this.isCardinalityRestriction && this.property.range) this.target = this.property.range;
+			else if(this.isValueRestriction) this.target = op.RDF_Resource();
+		}
+	
+	
+	this.getTarget = function(){
+		if(restrtype == "Individual") return this.target;
+		if(this.target == null) return jOWL('Thing');
+		if(!cachedTarget) cachedTarget = jOWL(this.target); return cachedTarget;}
+
+	this.getTargets = function(){
+		var q = this.getTarget(); 
+		if(q.type == "owl:Class") { 
+		return q.individuals().concat(q.children()); 
+		}}		
+	
+	this.merge = function(crit){
+		if(this.isCardinalityRestriction && crit.isValueRestriction ) { this.target = crit.target; return true;}
+		else if(this.isValueRestriction && crit.isCardinalityRestriction) 
+			switch(crit.restrtype){
+			case 'owl:cardinality': this.restriction.minCard = this.restriction.maxCard = crit.restriction.minCard; return true;
+			case 'owl:minCardinality': this.restriction.minCard = crit.restriction.minCard; return true;
+			case 'owl:maxCardinality': this.restriction.maxCard = crit.restriction.maxCard; return true;
+		} return false;
+	}
+	var suffix = this.target || this.restrtype;
+	this.name = this.property.name+'#'+suffix;
+	return this;
+}
+
+/** access to Datatype properties */
+jOWL.Ontology.DatatypeProperty = function(jnode){
+	var addCache = false; if(jOWL.options.cacheProperties){
+		var res = jnode.RDF_ID() || jnode.RDF_About(); 
+		var c = jOWL.cache.get(res); if(c) return c; }
+	this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
+	this.domain= $(this.jnode.get(0).selectSingleNode('rdfs:domain')).RDF_Resource();
+	this.range = $(this.jnode.get(0).selectSingleNode('rdfs:range')).RDF_Resource();
+	if(addCache) jOWL.cache.push(this);
+}
+
+/** access to Object properties */
+jOWL.Ontology.ObjectProperty = function(jnode){
+	var addCache = false; if(jOWL.options.cacheProperties){
+		var res = jnode.RDF_ID() || jnode.RDF_About();
+		var c = jOWL.cache.get(res); if(c) return c; addCache = true;}
+	this.inherit = jOWL.Ontology.internal; this.inherit(jnode);
+	this.domain= $(this.jnode.get(0).selectSingleNode('rdfs:domain')).RDF_Resource();
+	this.range = $(this.jnode.get(0).selectSingleNode('rdfs:range')).RDF_Resource();
+	if(addCache) jOWL.cache.push(this);
+}
+
+/** consider a better implementation ? */
+jOWL.Ontology.Thing = function(xmlNode){
+	this.inherit = jOWL.Ontology.internal; this.inherit(jOWL.Ontology.Thing.jnode); this.type = false;
+}
+
+/** access to an owl:Class */
+jOWL.Ontology.Class = function(jnode){
+	this.inherit = jOWL.Ontology.internal; this.inherit(jnode);	
+	if(this.type !='owl:Class') throw ("node with nodename "+this.type+" is not an owl:Class");
+	var that = this; 
+
+	/** Get a jOWL.Ontology.Array of parents */
+	this.parents = function(){
+		var oParents = jOWL.data(this.name, "parents");
+		if(oParents) return oParents;
+
+		var temp = [];
+		jOWL.XPath("rdfs:subClassOf", this.jnode).filter(function(){return $(this).RDF_Resource();})
+			.each(function(){temp.push($(this).RDF_Resource()); });
+
+		if(jOWL.options.reason) 
+		{	
+			var arr = jOWL.XPath("rdfs:subClassOf/owl:Restriction/owl:onProperty", this.jnode);
+			var arr2 = jOWL.XPath("owl:intersectionOf/owl:Restriction/owl:onProperty", this.jnode);
+			var arr3 = jOWL.XPath("owl:intersectionOf/owl:Class", this.jnode);
+			var proprefs = arr.add($(arr2));
+				proprefs.each(function(){ 
+					var p = $(this).RDF_Resource();
+					if(p) { var o = jOWL(p, {type: "property"});
+						if(o.domain && o.domain != that.name) temp.push(o.domain);  }}); 
+				$(arr3).each(function(){var p = $(this).RDF_About(); if(p) temp.push(p);  });
+		} 
+
+		var references = jOWL.getXML(temp.unique()); 
+		oParents = new jOWL.Ontology.Array(references, true);
+		if(!oParents.length){ oParents.push(jOWL('Thing')); }
+		else if(oParents.length > 1) oParents.filter(function(){return this.name != ('Thing');}); //Remove Thing reference if other parents exist
+		jOWL.data(this.name, "parents", oParents);			
+		return oParents;
+		};
+	this.individuals = function(){
+		var arr = new jOWL.Ontology.Array();
+		new jOWL.SPARQL_DL("Type(?x, "+this.name+")").execute({async: false, 
+			onComplete: function(r){ arr = r.jOWLArray("?x"); }  });
+		return arr; 
+		}
+	this.children = function(){
+		var oChildren = jOWL.data(this.name, "children");			
+		if(oChildren) return oChildren;
+		var c = new jOWL.Ontology.Array();
+		if(jnode.children().filter(function(){return this.tagName == "owl:oneOf";}).size())return c; 
+		//If OneOfList then only individuals may exist
+		var URI = this.URI;
+		jOWL.index("subClass").filter(function(){return $(this).RDF_Resource(URI);})
+			.each(function(){ c.push(new jOWL.Ontology.Class( $(this.parentNode)) );});
+		if(jOWL.options.reason){
+			//an intersection mentions this as class reference
+			jOWL.index("intersection").each(function(i, item){ 
+				jOWL.XPath('owl:Class', this).each(function(){ 						
+					if($(this).RDF_About(URI)) c.push(new jOWL.Ontology.Class( $(this.parentNode.parentNode)) );
+				}); });
+			//an ObjectProperty mentions this as domain
+			jOWL.index("property").each(function(){
+			if(this.domain == that.name) {
+				var nodes = jOWL.XPath('//owl:onProperty[@rdf:resource="#'+this.name+'"]/parent::owl:Restriction/..');
+				nodes.filter(function(){ return (this.nodeName == 'owl:intersectionOf' || this.nodeName == 'rdfs:subClassOf');
+				}).each(function(){
+					var cl = jOWL($(this.selectSingleNode('parent::owl:Class')));
+					if(!c.contains(cl) && cl.name != that.name && cl.name != undefined) { c.push(cl);}
+					});
+				}
+				});
+		}
+		jOWL.data(this.name, "children", c);
+		return c;
+		};
+	/**Similar to children but get's children of children as well and pumps it into one array. 
+	level: depth to fetch children, Default 5 */
+	this.descendants = function(level){
+		var level = level? level : 5;
+		var oDescendants = jOWL.data(this.name, "descendants");
+		if(oDescendants && oDescendants.level >= level) return oDescendants;
+		oDescendants = new jOWL.Ontology.Array(); oDescendants.level = level; 
+		descend(this, 1);
+		function descend(concept, i){				
+			if(i < level){ 
+			var count = i+1; var ch = concept.children(); oDescendants.concat(ch);
+			ch.each(function(item){ descend(item, count);});
+			}
+		}			
+		jOWL.data(this.name, "descendants", oDescendants);
+		return oDescendants;
+	}
+	/**Instead of just getting parents, constructs the entire hierarchy for a class
+	Returns a jOWL.Ontology.Array containing top nodes (classes directly subsumed by 'owl:Thing')
+	each node with exception of the leaves (original concept) has a variable invParents (jOWL.Ontology.Array) with child references
+	if options.prune: cuts down additional redundant information.
+	*/
+	this.hierarchy = function(options){
+		var settings = $.extend({prune: true}, options);
+		var concept = this;
+		var endNodes = new jOWL.Ontology.Array();
+		var index  = new jOWL.Ontology.Array();
+		var pruneIndex = new jOWL.Ontology.Array();
+		traverse(concept);
+		if(settings.prune) endNodes.each(function(item){prune(item);});
+
+		function traverse(concept){ 
+			var parents = concept.parents();
+			if(parents.size() == 1 && parents.contains('Thing')) { endNodes.pushUnique(concept);}
+			else parents.each(function(){ 		
+					var item = index.pushUnique(this); 
+					if(!item.invParents) item.invParents = new jOWL.Ontology.Array();
+					item.invParents.pushUnique(concept);
+					traverse(item);
+					});					
+		}
+
+		function prune(concept){ //will cut down 1 level sibling-child relationships...
+			var temparr = new jOWL.Ontology.Array();
+			var tt = concept.invParents;
+			if(concept.invParents) concept.invParents.filter(function(sibling, i){
+					var rightChild = true;
+					tt.each(function(child){
+						if(child.name != sibling.name){//sibling	
+							if(child.invParents && child.invParents.contains(sibling)) rightChild = false;
+						}
+					}); 
+					if(rightChild) temparr.push(sibling);
+					return rightChild;
+			});		
+			temparr.each(function(item){prune(item);});
+			}
+
+		return endNodes;
+
+	};
+	/**Get a jowl array of criteria - restriction: property + target object, will return true/false if present*/
+	this.sourceof = function(restriction){
+		var self = this, crit = jOWL.data(this.name, "sourceof");				
+		if(!crit) populate();
+		if(restriction){ //check if restriction is present
+			var bool = false; 
+			crit.each(function(item, i){
+				if(item.target == restriction.target.name && item.property.name == restriction.property.name) bool = true;	});
+			if(bool) return true;
+			this.parents().each(function(p){
+					if(!bool && p.sourceof) if(p.sourceof(restriction)) bool = true;
+				});				
+			return bool;
+		}
+
+		function populate(){
+			crit = new jOWL.Ontology.Array();
+			var arr = jOWL.XPath("rdfs:subClassOf/owl:Restriction", jnode)
+				.add(jOWL.XPath("owl:intersectionOf/owl:Restriction", jnode));
+			arr.each(function(index, entry){					
+				var cr = new jOWL.Ontology.Criterium($(entry));  var excrit = false;
+				crit.each(function(item, i){if(item.property.name == cr.property.name) excrit = item;});
+				if(excrit) { if(!excrit.merge(cr)) crit.push(cr); } else crit.push(cr);
+					}); 
+			jOWL.data(self.name, "sourceof", crit);
+			}
+		return crit;
+
+	};
+	/** Get a jOWL array of criteria where the target is an individual, not a class or undefined*/
+	this.valueRestrictions = function(includeAll){	
+		var r = new jOWL.Ontology.Array();
+		this.sourceof().each(function(item){ 				
+			var targ = item.getTarget();
+			if(targ && item.isValueRestriction) r.push(item);
+			else if(includeAll) r.push(item);
+			});
+
+		this.parents().each(function(p){
+			if(p.valueRestrictions) {
+				p.valueRestrictions(includeAll).each(function(i){ if(!r.contains(i)) r.push(i);	}); //don't add duplicates
+			}
+			});
+		return r;
+	}
+}
+/** Utility object */
+jOWL.Ontology.Array = function(arr, isXML){
+	var self = this;
+	var items = [];
+	if(arr){
+		if(isXML) $.each(arr, function(){items.push(jOWL($(this)));}); 
+		else items = arr;
+	}
+	this.length = items.length;
+	this.bind = function(listitem, processf){
+		var tt = [];
+		this.each(function(item, i){ 
+			var syntax = listitem ? listitem.clone(true) : $('<span/>');
+			var html  = item.bind(syntax).append(document.createTextNode(' '));
+			if(processf) processf(html, item);
+			tt.push(html.get(0));
+		}); return tt;
+	};
+	this.each = function(func, reverse){
+		if(reverse) for(var i=items.length - 1; i>=0;i--){ (function(){var item = items[i]; func.call(item, item, i);})();} 
+		else for(var i=0;i<items.length;i++){ (function(){var item = items[i]; func.call(item, item, i);})();}
+		return this;
+	};
+	this.concat = function(arr){items = items.concat(arr.getItems()); this.length = items.length; return this;}
+	this.filter = function(f){
+		this.each(function(item, i){var q = f.call(item, item, i); if(!q) items.splice(i, 1);}, true);
+		this.length = items.length;
+		return this;
+		}
+	this.get = function(object){
+		if(typeof object == 'number') return items[object];
+		var URI = object.URI || false;
+		var name = typeof object == "string" ? object : object.name;
+		var found  = false; 
+		this.each(function(){
+			if(URI){ if(this.URI == URI) found = this; }
+			else if(this.name == name) found = this;
+			}); 
+		return found;
+		}
+	this.contains = function(object){ 	if(this.get(object)) return true; return false; }
+	this.push = function(obj) {items.push(obj); self.length = items.length; return self;}
+	this.pushUnique = function(obj){
+		var entry = this.get(obj);
+		if(!entry){ this.push(obj); entry = this.get(obj);}
+		return entry;
+	}
+	this.size = function(){return this.length;}
+	this.getItems = function(){return items;}	
+}
+	
+
 jOWL.options = {reason: true, locale:false, defaultlocale: 'en', 
 	dictionary : { create: true, addID : true },
 	onParseError : function(msg){alert(msg);}, cacheProperties : true, niceClassLabels : true};
@@ -656,15 +677,15 @@ jOWL.getXML = function(rdfID){
 			node.notfound = notfound;
 			return node;
 		};
-		/**
-		* Initialize jOWL with an OWL-RDFS document.
-		* @param path relative path to xml document
-		* @param callback callback function to be called when loaded.
-		* @options : optional settings:
-		*    onParseError : function(msg){} function to ba called when parsing fails
-		*    reason : true/false, turns on additional reasoning at the expense of performance
-		*    locale: set preferred language (if available), examples en, fr...
-		*/
+/**
+* Initialize jOWL with an OWL-RDFS document.
+* @param path relative path to xml document
+* @param callback callback function to be called when loaded.
+* @options : optional settings:
+*    onParseError : function(msg){} function to ba called when parsing fails
+*    reason : true/false, turns on additional reasoning at the expense of performance
+*    locale: set preferred language (if available), examples en, fr...
+*/
 jOWL.load = function(path, callback, options){
 			if($.browser.msie && location.toString().indexOf('file') == 0) { //stupid IE won't load local xml files
 				var that = this;
@@ -819,10 +840,10 @@ jOWL.parseRDFa = function(fn, options){
         owl.push('</rdf:RDF>');
         jOWL.parse(owl.join('\n'), options); 
 		fn();
-  }
+ }
 /** 
 Match part or whole of the rdfResource<String>
-Used for matching terms
+Used for term searches
 options:
 	filter: filter on a specific type, possible values: Class, Thing, ObjectProperty, DatatypeProperty
 	exclude: exclude specific types, not fully implemented
@@ -864,7 +885,8 @@ jOWL.query = function(match, options){
 			} 
 			return jsonobj;
 		};
-/*
+/**
+allows asynchronous looping over arrays (prevent bowser freezing). 
 arr the array to loop asynchonrously over.
 options.modify(item) things to do with each item of the array
 options.onUpdate(array of results)
@@ -899,33 +921,58 @@ jOWL.throttle = function(arr, options){
 	}
 	return self;
 };
-/** 
-Experimental support for the abstract SPARQl-DL syntax 
-options.onComplete: function triggered when all individuals have been looped over
-options.onUpdate: partial results
-options.childDepth: depth to fetch children, default 4, impacts performance
-options.chewsize: arrays will be processed in smaller chunks (asynchronous), with size indicated by chewsize, default 10
-options.async: default true, query asynchronously
-options.expandQuery: 
-parameters: prefill some sparql-dl parameters with jOWL objects
-execute: start query, results are passed through options.onComplete
-*/
-jOWL.SPARQL_DL = function(syntax, parameters, options){
-		var self = this;
-        this.query = [];
-		this.result = {partial : [], param : {}};
-		this.result.jOWLArray = function(param){
-			if(!param) throw "parameter must be defined for jOWLArray function";
-			var arr = new jOWL.Ontology.Array();
-			for(var i=0;i<this.results.length;i++){
-			arr.push(this.results[i][param]);
-			}
-			return arr;
+/** Creates a new resultobj for the SPARQL-DL functionality */
+jOWL.SPARQL_DL_Result = function(){
+	var obj = {assert: undefined, partial : [], param : {}};
+	obj.sort = function(param){
+		if(!param) throw "parameter must be defined for sort function";
+		function sortResults(a, b){
+			var o = a[param].name || a[param];
+			var p = b[param].name || b[param];
+			return (o < p) ? -1 : 1;
 		}
-		this.parameters = $.extend({}, parameters);
-		this.options = $.extend({onComplete: function(results){}, onUpdate: function(){}}, options);
+		this.results.sort(sortResults);		
+	}
+	obj.jOWLArray = function(param){
+		if(!param) throw "parameter must be defined for jOWLArray function";
+		var arr = new jOWL.Ontology.Array();
+		for(var i=0;i<this.results.length;i++){
+		arr.push(this.results[i][param]);
+		}
+		return arr;
+	}
+	obj.extend = function(results){
+		if(!results.length) return this;
+		var v = [];	for(x in results[0]){v.push(x);} var variable = v[0];
+		if(this.param[variable] != undefined){
+				var matcharr = this.partial[this.param[variable]];
+				for(var i=matcharr.length-1;i>=0;i--){
+					var found = false;
+					for(var j=0;j<results.length;j++){
+						if(matcharr[i][variable].URI == results[j][variable].URI) found = true;
+					}
+					if(!found) matcharr.splice(i, 1);
+				}
+				this.partial[this.param[variable]] = matcharr;
+			}
+			else {
+				this.partial.push(results);
+				this.param[variable] = this.partial.length - 1;
+			}		
+			return this;		
+		}
+	
+	return obj;
+}
+/** Creates a new query for the SPARQL-DL functionality */
+jOWL.SPARQL_DL_Query = function(syntax, parameters){
 
-		//replace prefilled parameters or subsitute jOWl objects
+		var query = parse(syntax);
+		fill(query, parameters);
+		query = query.sort(sort);
+		
+
+	//replace prefilled parameters or subsitute jOWl objects
 		function fill(query, parameters){
 			for(var i = 0;i<query.length;i++){
 				for(var j =0; j<query[i][1].length; j++){
@@ -946,7 +993,6 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 			if(a[0] != 'Type' && b[0] == 'Type') return 1;
 			return 0;		
 		}
-
 		function parse(syntax){
              var r2 = /(\w+)[(]([^)]+)[)]/
              var entries = syntax.match(/(\w+[(][^)]+[)])/g);
@@ -958,27 +1004,27 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
              }
              return entries;
 			 //sort query for ...
-        }	
+        }
 		//takes into account intersectionOf information when querying for type, more advanced reasoning
-		function expandQuery(){
+		query.expand = function(){
 			var newquery = [], dupecheck = []; var expansion = [], count = 0;
-			for(var i = 0;i<self.query.length;i++){
-				if(self.query[i][0] == 'Type'){
+			for(var i = 0;i<query.length;i++){ 
+				if(query[i][0] == 'Type'){
 					var remove = false;
-					var cl = self.query[i][1][1];
+					var cl = query[i][1][1];
 					if(typeof cl != 'string'){
 						var inters = jOWL.XPath("owl:intersectionOf", cl.jnode);
 						if(inters.length){	
 							remove = true;
 							$(inters).children().each(function(){
 								if(this.nodeName == 'owl:Class'){ 
-									var syntax = "Type("+self.query[i][1][0]+", "+$(this).RDF_About()+")";
+									var syntax = "Type("+query[i][1][0]+", "+$(this).RDF_About()+")";
 									if($.inArray(syntax, expansion) == -1) expansion.push(syntax);
 									}
 								else if(this.nodeName == 'owl:Restriction'){
 									var restr = new jOWL.Ontology.Criterium($(this));
 									if(restr.target){ 
-										var syntax = "PropertyValue("+self.query[i][1][0]+", "+restr.property.name+", "+restr.target+")";
+										var syntax = "PropertyValue("+query[i][1][0]+", "+restr.property.name+", "+restr.target+")";
 										if($.inArray(syntax, expansion) == -1) expansion.push(syntax);}
 								}
 							});							
@@ -988,27 +1034,52 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 							var t = count;
 							for(var k = 0+t;k<expansion.length;k++){
 								count++;
-								var n = parse(expansion[k]); fill(n, self.parameters);
+								var n = parse(expansion[k]); fill(n, parameters);
 								newquery.push(n[0]);
 							}		
 						}
-					else newquery.push(self.query[i]);
+					else newquery.push(query[i]);
 				}
-				else newquery.push(self.query[i]);
+				else newquery.push(query[i]);
 			}
 			return newquery;
 		}
 
-        	
+		return query;
+
+}
+/** 
+Support for abstract SPARQl-DL syntax 
+options.onComplete: function triggered when all individuals have been looped over
+options.onUpdate: partial results
+options.childDepth: depth to fetch children, default 4, impacts performance
+options.chewsize: arrays will be processed in smaller chunks (asynchronous), with size indicated by chewsize, default 10
+options.async: default true, query asynchronously
+options.expandQuery: default true
+parameters: prefill some sparql-dl parameters with jOWL objects
+execute: start query, results are passed through options.onComplete
+*/
+jOWL.SPARQL_DL = function(syntax, parameters, options){
+		var self = this;
+		this.parameters = $.extend({}, parameters);
+        this.query = new jOWL.SPARQL_DL_Query(syntax, this.parameters); //[];
+		this.result = new jOWL.SPARQL_DL_Result(); 		
+		this.options = $.extend({expandQuery: true, onComplete: function(results){}, onUpdate: function(){}}, options);
+
+		function error(msg){ self.result.error = msg; return self.options.onComplete(self.result);}
+
+		        	
 		/** 
 		if(options.async == false) then this method returns the result of options.onComplete, 
 		no matter what, result is always passed in options.onComplete
 		*/
         this.execute = function(options){
 			this.options = $.extend(this.options, options);
-			if(options.expandQuery) this.query = expandQuery();
+
+			if(self.options.expandQuery) this.query = this.query.expand();
 			var i = 0; var resultobj = this.result;
-			var loopoptions = $.extend(options, { onComplete: function(results){	i++; resultobj = results; loop(i);} });			
+			var loopoptions = $.extend({}, this.options);
+			loopoptions.onComplete =  function(results){	i++; resultobj = results; loop(i);}
 
             if(!this.query.length) {
 				resultobj.error = this.error || "no query found or query did not parse properly"; 
@@ -1016,13 +1087,14 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 				}			
 
 			function loop(i){
-				if(i < self.query.length) { 
-					process(self.query[i], resultobj, loopoptions );
-				}
-				else {
+				if(i < self.query.length) { process(self.query[i], resultobj, loopoptions ); }
+				else { //finalize
 					var res = [];
 					for(var i = 0;i<resultobj.partial.length;i++){
-						res = res.concat(resultobj.partial[i]);
+						if(resultobj.partial[i]) {
+							res = res.concat(resultobj.partial[i]);							
+						}
+						
 					}
 					resultobj.results = res;
 					return self.options.onComplete(resultobj);
@@ -1032,97 +1104,133 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 
         }
 
+	
+		function map(variable, result, obj){var r = obj || {}; r[variable] = result; return r;} //utility method, avoid repetition of code
+		
+
+		this.fn = {
+			"Type" : function(resultobj, options){
 				
-		/** results are passed in the options.onComplete function */
-		function process(entry, resultobj, options){
-			var options = $.extend({chewsize: 10, async : true, onUpdate : function(result){}, onComplete : function(results){}}, options);
-			var sizes = {"Type": 2, "PropertyValue" : 3};			
-
-			function merge(results, resultobj, variable){
-				if(resultobj.param[variable] != undefined){
-					var matcharr = resultobj.partial[resultobj.param[variable]];
-					for(var i=matcharr.length-1;i>=0;i--){
-						var found = false;
-						for(var j=0;j<results.length;j++){
-						if(matcharr[i][variable].URI == results[j][variable].URI) found = true;
+				if(typeof this[0] == 'string' && typeof this[1] == 'string'){//both undefined, work with previous queries, implementation not yet optimal
+					var ivar = this[0], cvar = this[1]; 
+					if(resultobj.param[cvar] != undefined){
+						var classlist = new jOWL.Ontology.Array();
+						var cl = resultobj.partial[resultobj.param[cvar]];
+						for(var i=0;i<cl.length;i++){ classlist.push(cl[i][cvar]);}
+						resultobj.partial[resultobj.param[cvar]] = false;
+						var settings = $.extend({}, options);
+						settings.modify = function(result){
+							var ind = jOWL($(this));
+							var concept = classlist.get(ind.Class); 
+							if(concept) { ind.owlClass(concept); return map(cvar, concept, map(ivar,ind));	}
 						}
-						if(!found) matcharr.splice(i, 1);
+						settings.onComplete = function(results){options.onComplete(resultobj.extend(results));}					
+						//asynchronously loop over Individuals
+						new jOWL.throttle(jOWL.index("Thing"), settings).start(0, options.chewsize);
+						return;					
 					}
-					resultobj.partial[resultobj.param[variable]] = matcharr;
-				}
-				else {
-					resultobj.partial.push(results);
-					resultobj.param[variable] = resultobj.partial.length - 1;
-				}		
-				return resultobj;
-			}
-
-			function error(msg){ resultobj.error = msg; return options.onComplete(resultobj);}
-
-			if(!sizes[entry[0]]) return error("'"+entry[0]+"' queries are not implemented");
-			if(sizes[entry[0]] != entry[1].length) return error("invalid SPARQL-DL "+entry[0]+" specifications, "+sizes[entry[0]]+" parameters required");
-			
-			if(entry[0] == 'Type'){
-				if(typeof entry[1][0] == 'string' && typeof entry[1][1] == 'string'){//both undefined, work with previous queries
+					
 					return error("not implemented yet");
 				}
-				else if(typeof entry[1][1] == 'string'){//get class
-					if(entry[1][0].type != 'owl:Thing') return error("First parameter in SPARQL-DL Query for Type must be an owl:Thing");
-					var r = {};	r[entry[1][1]] = entry[1][0].owlClass();
-					return options.onComplete(merge(r, resultobj, entry[1][1]));
+				
+				if(typeof this[1] == 'string'){//get class
+					if(this[0].type != 'owl:Thing') return error("First parameter in SPARQL-DL Query for Type must be an owl:Thing");
+					return options.onComplete(resultobj.extend([map(this[1], this[0].owlClass())]));
 				}
-				else if(typeof entry[1][0] == 'string'){//get instances
-					var variable = entry[1][0]; //remember the variable
-					if(entry[1][1].type !='owl:Class') return error("Second parameter in SPARQL-DL Query for Type must be an owl:Class");
+				
+				if(typeof this[0] == 'string'){//get instances
+					var variable = this[0];
+					if(this[1].type !='owl:Class') return error("Second parameter in SPARQL-DL Query for Type must be an owl:Class");
 					
 					//if OneOf List then individuals are defined already
-					var oneOf = entry[1][1].jnode.children().filter(function(){return this.tagName == "owl:oneOf";});
+					var oneOf = this[1].jnode.children().filter(function(){return this.tagName == "owl:oneOf";});
 					if(oneOf.size()) {
-							var thinglist = [];
-							oneOf.children().each(function(){ 
-								var r = {}; r[variable] = jOWL($(this).RDF_About());	thinglist.push(r); 
-								});
-							return options.onComplete(merge(thinglist, resultobj, variable));
-							}
+						var thinglist = [];
+						oneOf.children().each(function(){ thinglist.push(map(variable, jOWL($(this).RDF_About())));    });
+						return options.onComplete(resultobj.extend(thinglist));
+						}
 					//regular looping
-					else {
-						var classlist = new jOWL.Ontology.Array(); classlist.push(entry[1][1]);
-						entry[1][1].descendants(self.options.childDepth).each(function(){classlist.push(this);});
-					
-						//asynchronously loop over Individuals
-						var t = new jOWL.throttle(jOWL.index("Thing"), {
-							modify : function(result){ 
-								var ind = jOWL($(this));
-								var concept = classlist.get(ind.Class); 
-								if(concept) { ind.owlClass(concept); var r = {}; r[variable] = ind; return r; }
-							},
-							chewsize : options.chewsize,					
-							async : options.async,
-							onUpdate : function(results){ options.onUpdate(results); },
-							onComplete : function(results){ options.onComplete(merge(results, resultobj, variable));	}
-							});
-						t.start(0, options.chewsize);
+					var classlist = new jOWL.Ontology.Array(); classlist.push(this[1]);
+					this[1].descendants(options.childDepth).each(function(){classlist.push(this);});
+
+					var settings = $.extend({}, options);
+					settings.modify = function(result){
+						var ind = jOWL($(this));
+						var concept = classlist.get(ind.Class); 
+						if(concept) { ind.owlClass(concept); return map(variable,ind);}
 					}
+					settings.onComplete = function(results){options.onComplete(resultobj.extend(results));}
 				
+					//asynchronously loop over Individuals
+					new jOWL.throttle(jOWL.index("Thing"), settings).start(0, options.chewsize);
 				}
-				
-				
-			}// end type
-			else if(entry[0] == 'PropertyValue'){
-				var source = entry[1][0], S = (typeof source != 'string'), pS = (resultobj.param[source] != undefined);
-				var property = entry[1][1], P = (typeof property != 'string'), pP = (resultobj.param[property] != undefined);
-				var target = entry[1][2], T = (typeof target != 'string'), pT = (resultobj.param[target] != undefined);
+				else {//both defined //assert
+					if(this[0].type != 'owl:Thing') return error("First parameter in SPARQL-DL Query for Type must be an owl:Thing");
+					if(this[1].type !='owl:Class') return error("Second parameter in SPARQL-DL Query for Type must be an owl:Class");
+					var cl = this[0].owlClass();
+					if(cl.URI == this[1].URI && resultobj.assert !== false) resultobj.assert = true;
+					else {
+						function traverse(node, match){
+							var a = node.parents(); 
+							var found = false;
+							if(a.contains(match)) found = true;
+							else a.each(function(){ if(!found && traverse(this, match)) found = true; });
+							return found;
+						}
+						resultobj.assert = traverse(cl, this[1]);
+					}
+					options.onComplete(resultobj);
+					//if(parents.size() == 1 && parents.contains('Thing'))
+				}
+			
+			},
+			"Class" : function(resultobj, options){
+				var variable = this[0];
+				var settings = $.extend({}, options);
+				settings.modify = function(result){
+						if(result.nodeName != "owl:Class") return; 
+						return map(variable, jOWL($(result)));
+					}
+				settings.onComplete = function(results){options.onComplete(resultobj.extend(results));}
+				new jOWL.throttle(jOWL.index("ID"), settings).start(0, options.chewsize);
+			},
+			"ObjectProperty" : function(resultobj, options){
+				var variable = this[0];
+				var settings = $.extend({}, options);
+				settings.modify = function(result){
+						if(result.type != "owl:ObjectProperty") return; 
+						return map(variable, result);
+					}
+				settings.onComplete = function(results){options.onComplete(resultobj.extend(results));}
+				new jOWL.throttle(jOWL.index("property").getItems(), settings).start(0, options.chewsize);
+			},
+			"DatatypeProperty" : function(resultobj, options){
+				var variable = this[0];
+				var settings = $.extend({}, options);
+				settings.modify = function(result){
+						if(result.type != "owl:DatatypeProperty") return; 
+						return map(variable, result);
+					}
+				settings.onComplete = function(results){options.onComplete(resultobj.extend(results));}
+				new jOWL.throttle(jOWL.index("property").getItems(), settings).start(0, options.chewsize);
+			},
+			"PropertyValue" : function(resultobj, options){				
+				var source = this[0], S = (typeof source != 'string'), pS = (resultobj.param[source] != undefined);
+				var property = this[1], P = (typeof property != 'string'), pP = (resultobj.param[property] != undefined);
+				var target = this[2], T = (typeof target != 'string'), pT = (resultobj.param[target] != undefined);
 
 				if(P){ //property defined
 					if(S){ //query for target, property and source defined
 					
 					}
 					else if(T){ //query for source, property and target defined
-						if(pS){
+						
+						if(pS){ //fill in
 							var err = false;
 							resultobj.partial[resultobj.param[source]] = $.map(resultobj.partial[resultobj.param[source]], function(n){
 								if(n[source].type !='owl:Thing') err = "Source in SPARQL-DL Query for PropertyValue must be an owl:Thing";
-								if(n[source].localRestrictions(property, target) || n[source].owlClass().sourceof({property: property, target: target})) 
+								if(n[source].localRestrictions(property, target) 
+									|| n[source].owlClass().sourceof({property: property, target: target})) 
 									return n;
 							});
 							return err ? error(err) : options.onComplete(resultobj);
@@ -1133,13 +1241,58 @@ jOWL.SPARQL_DL = function(syntax, parameters, options){
 					
 					}				
 				}
-				return error('not implemented yet');
-			}// end PropertyValue
+				if(S){
+					var sourceof = source.valueRestrictions(true); var arr = [];
+					if(P){
+						if(T){
+							if(resultobj.assert !== false) {
+								resultobj.assert = false;
+								sourceof.each(function(){								
+									if(this.property.URI == property.URI)
+										if(this.target == target.name || this.target == target.URI)
+											resultobj.assert = true;
+								});
+							}
+							return options.onComplete(resultobj);
+						}
+						else sourceof.each(function(){
+							if(this.property.URI == property.URI) arr.push(map(target, this.getTarget()));
+						});
+						
+					}
+					else if(T){
+						sourceof.each(function(){
+							if(this.target == target.name || this.target == target.URI) arr.push(map(property, this.property));
+						});
+					}
+					else {						
+						sourceof.each(function(){
+							var n = map(property, this.property); map(target, this.getTarget(), n);
+							arr.push(n);
+						});
+					}
+					resultobj.partial.push(arr);
+					return options.onComplete(resultobj);
+				}
+				return error('Unsupported PropertyValue query');			
+			}
 		}
 
-		this.query = parse(syntax);
-		fill(this.query, this.parameters);
-		this.query = this.query.sort(sort);
+				
+		/** results are passed in the options.onComplete function */
+		function process(entry, resultobj, options){
+			var options = $.extend({chewsize: 10, async : true, onUpdate : function(result){}, onComplete : function(results){}}, options);
+			var sizes = {"Type": 2, "DirectType": 2, "PropertyValue" : 3, "Class": 1, "ObjectProperty": 1, "DatatypeProperty": 1};				
+
+			if(!sizes[entry[0]]) return error("'"+entry[0]+"' queries are not implemented");
+			if(sizes[entry[0]] != entry[1].length) return error("invalid SPARQL-DL "+entry[0]+" specifications, "+sizes[entry[0]]+" parameters required");
+			if(entry[0] == "DirectType") {
+				options.childDepth = 1;
+				return self.fn['Type'].call(entry[1], resultobj, options);
+				}
+			return self.fn[entry[0]].call(entry[1], resultobj, options);
+		}
+
         return this;
     }
 
