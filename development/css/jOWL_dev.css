@@ -1,3 +1,4 @@
+
 /*owl_navbar*/
 .owl_navbar {border:1px solid steelblue;text-align:center;min-height:200px;}
 .owl_navbar span {margin-right:5px;}
@@ -30,13 +31,11 @@
 .owl_treeview .tv .tvilc  { background-image:url(../img/treeView/dotted/tvilc.gif); }
 .owl_treeview .tv .tvile   { background-image:url(../img/treeView/dotted/tvile.gif); }
 .owl_treeview .tvload { background-image:url(../img/treeView/dotted/tviload.gif);}
-/*Individuals */
-.owl_indiv {border:1px solid steelblue;min-height:100px}
-.owl_indiv_list {background-color:#FFFFFF;}
-
 
 /**/
-.owl_UI {margin-top:0px;min-height:200px;border:1px solid steelblue;}
-.owl_UI .title{margin:0px;text-align:center;background-color:#F8F8FF}
-.owl_UI_content {padding:5px;}
+.owl_UI {margin-top:0px;min-height:200px;}
+.owl_UI_box {margin-top:0px;border:1px solid steelblue;min-height:200px;}
+.owl_UI .title, .owl_UI_box .title{margin:0px;text-align:center;background-color:#F8F8FF}
+.owl_UI_content, .owl_UI_box .owl_UI_content {padding:5px;}
 .owl_UI_focus {background-color:#E6E6FA;font-weight:bold;}
+.owl_UI_white {background-color:#FFFFFF;}
